@@ -20,8 +20,11 @@
 #define EMU_FRAME_MS    (1000 / EMU_FPS)
 #define EMU_CYCLES_PER_FRAME (TAMAGO_CLOCK_RATE / EMU_FPS)
 
-// Display scaling (Emery only for now).
-#define TAMA_SCALE      2
+// Display scaling. Hardware is 48×31; on Emery's 200×228 we can comfortably
+// go 3x for a sharp tama at 144×93 pixels (or even 4x = 192×124 for a really
+// chunky look). Stick with 3x for now to leave headroom for the watchface
+// chrome.
+#define TAMA_SCALE      3
 #define TAMA_DRAW_W     (TAMAGO_LCD_WIDTH  * TAMA_SCALE)
 #define TAMA_DRAW_H     (TAMAGO_LCD_HEIGHT * TAMA_SCALE)
 
