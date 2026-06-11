@@ -45,27 +45,72 @@ static bool        s_running;
 static GColor s_palette[4];
 
 // ----- Display rendering ----
+//
+// Fast path: capture the Pebble framebuffer once per frame and write our
+// scaled pixels directly into it via memset. This is ~50x faster than
+// calling graphics_fill_rect for every emulator pixel — at 48×31 scaled
+// 3× we'd otherwise be making ~1500 fill_rect calls per frame, which
+// completely dominates the frame budget.
+//
+// Emery uses GBitmapFormat8Bit (1 byte per pixel, full argb8). We can
+// blast a horizontal run of identical pixels with a single memset.
 
 static void tama_layer_update(Layer *layer, GContext *ctx)
 {
-  // Fetch the latest framebuffer from the emulator.
+  // Pull the latest emulator framebuffer (48×31 indices into s_palette).
   tamago_get_display(s_framebuffer);
 
-  GRect bounds = layer_get_bounds(layer);
-  // Center the scaled tama within the layer.
-  int ox = (bounds.size.w - TAMA_DRAW_W) / 2;
-  int oy = (bounds.size.h - TAMA_DRAW_H) / 2;
+  // The Pebble framebuffer covers the whole window in window coordinates,
+  // not layer coordinates. Our tama layer sits at (0, 30) so we add 30
+  // to every y we write.
+  //
+  // graphics_capture_frame_buffer hands us a GBitmap; on Emery this is
+  // GBitmapFormat8Bit: row_stride bytes wide, one byte per pixel.
+  GBitmap *fb = graphics_capture_frame_buffer(ctx);
+  if (!fb) return;
 
-  for (int y = 0; y < TAMAGO_LCD_HEIGHT; y++) {
-    for (int x = 0; x < TAMAGO_LCD_WIDTH; x++) {
-      uint8_t pix = s_framebuffer[y * TAMAGO_LCD_WIDTH + x] & 0x3;
-      graphics_context_set_fill_color(ctx, s_palette[pix]);
-      graphics_fill_rect(ctx,
-                         GRect(ox + x * TAMA_SCALE, oy + y * TAMA_SCALE,
-                               TAMA_SCALE, TAMA_SCALE),
-                         0, GCornerNone);
+  uint8_t  *data       = gbitmap_get_data(fb);
+  uint16_t  row_bytes  = gbitmap_get_bytes_per_row(fb);
+  GRect     fb_bounds  = gbitmap_get_bounds(fb);
+
+  // Layer origin within window coordinates.
+  Layer *root = window_get_root_layer(s_window);
+  GRect layer_frame = layer_get_frame(layer);
+  (void)root;  // not strictly needed but documents the relationship
+  int layer_x = layer_frame.origin.x;
+  int layer_y = layer_frame.origin.y;
+
+  // Tama placement within the layer.
+  int ox = layer_x + (layer_frame.size.w - TAMA_DRAW_W) / 2;
+  int oy = layer_y + (layer_frame.size.h - TAMA_DRAW_H) / 2;
+
+  // For each emulator pixel, fill a TAMA_SCALE × TAMA_SCALE block. We
+  // also pre-cache the palette as raw argb8 bytes so memset works
+  // directly without GColor unpacking.
+  uint8_t pal_argb[4] = {
+    s_palette[0].argb,
+    s_palette[1].argb,
+    s_palette[2].argb,
+    s_palette[3].argb,
+  };
+
+  for (int sy = 0; sy < TAMAGO_LCD_HEIGHT; sy++) {
+    for (int sx = 0; sx < TAMAGO_LCD_WIDTH; sx++) {
+      uint8_t v = pal_argb[s_framebuffer[sy * TAMAGO_LCD_WIDTH + sx] & 0x3];
+
+      // Write a TAMA_SCALE-wide horizontal run on each of the TAMA_SCALE
+      // rows. The compiler unrolls these small inner loops with -Os.
+      for (int dy = 0; dy < TAMA_SCALE; dy++) {
+        int py = oy + sy * TAMA_SCALE + dy;
+        if (py < fb_bounds.origin.y || py >= fb_bounds.origin.y + fb_bounds.size.h) continue;
+        int px = ox + sx * TAMA_SCALE;
+        if (px < fb_bounds.origin.x || px + TAMA_SCALE > fb_bounds.origin.x + fb_bounds.size.w) continue;
+        memset(&data[py * row_bytes + px], v, TAMA_SCALE);
+      }
     }
   }
+
+  graphics_release_frame_buffer(ctx, fb);
 }
 
 // ----- Emulator step timer ----
