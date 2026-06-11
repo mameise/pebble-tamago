@@ -151,6 +151,39 @@ void tamago_set_buttons(uint8_t mask)
   g_sys->keys = lo | 0xF0;
 }
 
+// ----- Debug ---------------------------------------------------------------
+
+void tamago_debug_get_state(uint16_t *pc, uint8_t *a, uint8_t *x, uint8_t *y,
+                            uint8_t *s, uint8_t *bank)
+{
+  if (!g_sys) return;
+  if (pc)   *pc   = g_sys->cpu.pc;
+  if (a)    *a    = g_sys->cpu.a;
+  if (x)    *x    = g_sys->cpu.x;
+  if (y)    *y    = g_sys->cpu.y;
+  if (s)    *s    = g_sys->cpu.s;
+  if (bank) *bank = g_sys->rom_bank_id;
+}
+
+bool tamago_debug_dram_dirty(void)
+{
+  if (!g_sys) return false;
+  for (int i = 0; i < TAMAGO_DRAM_SIZE; i++) {
+    if (g_sys->dram[i]) return true;
+  }
+  return false;
+}
+
+uint16_t tamago_debug_dram_nonzero_count(void)
+{
+  if (!g_sys) return 0;
+  uint16_t n = 0;
+  for (int i = 0; i < TAMAGO_DRAM_SIZE; i++) {
+    if (g_sys->dram[i]) n++;
+  }
+  return n;
+}
+
 // ----- Save state ---------------------------------------------------------
 
 // Serialised state layout:

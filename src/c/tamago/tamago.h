@@ -87,6 +87,18 @@ void tamago_set_buttons(uint8_t mask);
 // Tear down the emulator and free resources.
 void tamago_release(void);
 
+// Debug: return current CPU state for logging. Fills the passed-in pointers
+// (any of which may be NULL) with the current register values.
+void tamago_debug_get_state(uint16_t *pc, uint8_t *a, uint8_t *x, uint8_t *y,
+                            uint8_t *s, uint8_t *bank);
+
+// Debug: return whether any dram bytes are non-zero. If the ROM hasn't
+// touched the display at all, all dram = 0 and the screen appears uniform.
+bool tamago_debug_dram_dirty(void);
+
+// Debug: count how many DRAM bytes are non-zero (0..512).
+uint16_t tamago_debug_dram_nonzero_count(void);
+
 // State serialization for save/restore. Returns total size needed when
 // `buf` is NULL or `bufsize` is too small; otherwise the number of bytes
 // actually written.
