@@ -121,7 +121,6 @@ static void step_tick(void *data)
   if (!s_running) return;
 
   // Time the step so we can see how many real ms we spend emulating.
-  // time_ms() returns milliseconds since some epoch, wraps at 2^32.
   time_t epoch_s; uint16_t epoch_ms;
   time_ms(&epoch_s, &epoch_ms);
   uint32_t t0 = (uint32_t)epoch_s * 1000 + epoch_ms;
@@ -134,11 +133,20 @@ static void step_tick(void *data)
   uint32_t t1 = (uint32_t)epoch_s * 1000 + epoch_ms;
   uint32_t step_ms = t1 - t0;
 
+  // Track wall-clock time between successive step_ticks (not just time
+  // spent inside step_cycles). This is the true emulation throughput
+  // because the AppTimer delay between frames is part of the cost.
+  static uint32_t last_t = 0;
+  uint32_t wall_ms = (last_t == 0) ? step_ms : (t1 - last_t);
+  last_t = t1;
+
   // Track running totals for a rolling rate measurement.
   static uint32_t bucket_cycles = 0;
-  static uint32_t bucket_ms = 0;
-  bucket_cycles += spent;
-  bucket_ms     += step_ms;
+  static uint32_t bucket_step_ms = 0;
+  static uint32_t bucket_wall_ms = 0;
+  bucket_cycles  += spent;
+  bucket_step_ms += step_ms;
+  bucket_wall_ms += wall_ms;
 
   // Update status line (don't do this every frame — keep it cheap).
   static uint32_t status_ctr = 0;
@@ -156,23 +164,38 @@ static void step_tick(void *data)
     uint16_t pc; uint8_t a, x, y, s, bank;
     tamago_debug_get_state(&pc, &a, &x, &y, &s, &bank);
     uint16_t nz = tamago_debug_dram_nonzero_count();
-    // bucket_cycles emulated cycles in bucket_ms real ms
-    // → effective emulated MHz = bucket_cycles / (bucket_ms * 1000)
-    // → speed ratio vs 4MHz target = effective / 4
-    uint32_t khz_eff = bucket_ms ? (bucket_cycles / bucket_ms) : 0;
+    uint32_t khz_step = bucket_step_ms ? (bucket_cycles / bucket_step_ms) : 0;
+    uint32_t khz_wall = bucket_wall_ms ? (bucket_cycles / bucket_wall_ms) : 0;
     APP_LOG(APP_LOG_LEVEL_INFO,
-            "tamago: PC=$%04x bank=%d nz=%u/512 | perf: %lu cyc in %lu ms = %lu kHz (target 4000 kHz)",
-            pc, bank, nz,
+            "perf: %lu cyc | step %lu ms = %lu kHz | wall %lu ms = %lu kHz (target 4000)",
             (unsigned long)bucket_cycles,
-            (unsigned long)bucket_ms,
-            (unsigned long)khz_eff);
-    bucket_cycles = 0;
-    bucket_ms     = 0;
+            (unsigned long)bucket_step_ms,
+            (unsigned long)khz_step,
+            (unsigned long)bucket_wall_ms,
+            (unsigned long)khz_wall);
+    APP_LOG(APP_LOG_LEVEL_INFO,
+            "state: PC=$%04x bank=%d nz=%u/512",
+            pc, bank, nz);
+    bucket_cycles  = 0;
+    bucket_step_ms = 0;
+    bucket_wall_ms = 0;
   }
 
-  // Redraw and schedule next frame.
+  // Redraw the tama layer.
   if (s_tama_layer) layer_mark_dirty(s_tama_layer);
-  s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
+
+  // Adaptive frame pacing: aim for one frame every EMU_FRAME_MS ms of
+  // wall-clock time. If step_cycles already ate the whole budget (or
+  // more), fire the next tick almost immediately (1 ms minimum). This
+  // avoids wasting the 50 ms timer delay when we're behind, which is
+  // what was making the Tama clock run at half speed.
+  uint32_t next_delay;
+  if (step_ms >= EMU_FRAME_MS) {
+    next_delay = 1;
+  } else {
+    next_delay = EMU_FRAME_MS - step_ms;
+  }
+  s_step_timer = app_timer_register(next_delay, step_tick, NULL);
 }
 
 // ----- Button handlers ----
