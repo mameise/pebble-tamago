@@ -1,0 +1,31 @@
+{
+  "name": "tamago-pebble",
+  "author": "Bernd",
+  "version": "0.1.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "TamaGo",
+    "uuid": "8c5f3a1e-d472-4b09-9a3e-2e8c64f9b3a1",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "resources": {
+      "media": [
+        {
+          "type": "raw",
+          "name": "TAMA_ROM",
+          "file": "data/tamago.bin"
+        }
+      ]
+    }
+  }
+}

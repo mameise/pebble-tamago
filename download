@@ -1,0 +1,5 @@
+build/
+*.pbw
+*.pyc
+.DS_Store
+node_modules/
