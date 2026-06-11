@@ -1,1 +1,96 @@
+/*
+ * tamago.h - Tama-Go (Tamagotchi V7) emulator core for Pebble
+ *
+ * Based on asterick/tamago (JavaScript implementation):
+ *   https://github.com/asterick/tamago
+ *
+ * Hardware: GPLB52320A (8-bit 6502-family) @ 4 MHz
+ * Display:  64x32 pixels, 4 grayscale levels (512 bytes DRAM)
+ *
+ * Memory map (16-bit address space, banked):
+ *   $0000-$0FFF  Work RAM (1.5 KB, mirrored)
+ *   $1000-$2FFF  Display RAM (512 bytes, mirrored)
+ *   $3000-$3FFF  CPU control registers
+ *   $4000-$BFFF  Banked ROM (32 KB window, 20 banks total = 640 KB)
+ *   $C000-$FFFF  Static ROM (16 KB, always mapped from bank 0)
+ *
+ * The 640 KB ROM lives in Pebble flash as a resource. To save RAM we
+ * only keep the currently-selected bank (32 KB) mirrored in memory.
+ * Static ROM (bank 0, first 16 KB) is loaded once at boot.
+ */
 
+#ifndef TAMAGO_H
+#define TAMAGO_H
+
+#include <pebble.h>
+
+// Display dimensions (native Tama-Go hardware)
+#define TAMAGO_LCD_WIDTH    64
+#define TAMAGO_LCD_HEIGHT   32
+
+// 4 grayscale levels per pixel (2 bits each)
+#define TAMAGO_PALETTE_SIZE 4
+
+// CPU clock rate (Hz)
+#define TAMAGO_CLOCK_RATE   4000000
+
+// Memory region sizes
+#define TAMAGO_WRAM_SIZE    0x600   // 1.5 KB work RAM
+#define TAMAGO_DRAM_SIZE    0x200   // 512 B display RAM
+#define TAMAGO_CPUREG_SIZE  0x100   // 256 B control registers
+#define TAMAGO_ROM_BANK_SIZE 0x8000 // 32 KB per bank
+#define TAMAGO_STATIC_ROM_SIZE 0x4000  // 16 KB static (high) ROM
+
+// Status flag bits in P register
+#define FLAG_C  0x01  // Carry
+#define FLAG_Z  0x02  // Zero
+#define FLAG_I  0x04  // Interrupt disable
+#define FLAG_D  0x08  // Decimal mode
+#define FLAG_B  0x10  // Break (software)
+#define FLAG_U  0x20  // Unused (always 1)
+#define FLAG_V  0x40  // Overflow
+#define FLAG_N  0x80  // Negative
+
+// Button bitmask (Tama-Go has 3 buttons: A, B, C plus reset)
+#define TAMAGO_BTN_A     0x01
+#define TAMAGO_BTN_B     0x02
+#define TAMAGO_BTN_C     0x04
+#define TAMAGO_BTN_RESET 0x08
+
+// Forward declaration for the system state
+typedef struct tamago_system tamago_system_t;
+
+// Public API ---------------------------------------------------------------
+
+// Initialize the emulator. Must be called once at startup. Returns false on
+// failure (e.g. ROM resource missing).
+bool tamago_init(void);
+
+// Reset the CPU (jumps to the reset vector). Memory and EEPROM are preserved.
+void tamago_reset(void);
+
+// Run the emulator for the given number of CPU cycles. Returns the actual
+// number of cycles consumed (may differ slightly due to instruction lengths).
+uint32_t tamago_step_cycles(uint32_t target_cycles);
+
+// Run a single instruction. Returns the cycle count of that instruction.
+uint8_t tamago_step_one(void);
+
+// Read the current display state. Pixels are 2 bits each (0..3 = grayscale
+// level). `out` must be at least TAMAGO_LCD_WIDTH * TAMAGO_LCD_HEIGHT bytes.
+void tamago_get_display(uint8_t *out);
+
+// Set the button state. `mask` is a bitmask of TAMAGO_BTN_* constants.
+// Bits set = button pressed.
+void tamago_set_buttons(uint8_t mask);
+
+// Tear down the emulator and free resources.
+void tamago_release(void);
+
+// State serialization for save/restore. Returns total size needed when
+// `buf` is NULL or `bufsize` is too small; otherwise the number of bytes
+// actually written.
+uint32_t tamago_serialize_state(uint8_t *buf, uint32_t bufsize);
+bool tamago_deserialize_state(const uint8_t *buf, uint32_t bufsize);
+
+#endif // TAMAGO_H
