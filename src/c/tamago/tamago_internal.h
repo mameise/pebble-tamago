@@ -72,10 +72,52 @@ typedef struct tamago_system {
 // Module-private to the emulator; the Pebble app uses the public API.
 extern tamago_system_t *g_sys;
 
-// Memory access helpers (defined in tamago_memory.c)
-uint8_t  tamago_read(uint16_t addr);
-uint16_t tamago_read16(uint16_t addr);
-void     tamago_write(uint16_t addr, uint8_t value);
+// ----- Memory access (fast inline path) -----------------------------------
+//
+// Page table: 256 entries, one per 256-byte page of the 64K address space.
+// Each entry points at the backing RAM/ROM buffer for that page, or NULL
+// if the page needs slow-path I/O handling (only $3000-$30FF and mirrors).
+//
+// Defined in tamago_memory.c. Inline accessors below dereference these
+// directly so reads/writes inline into the CPU's instruction switch in
+// tamago_cpu.c.
+extern uint8_t *tamago_read_page[256];
+extern uint8_t *tamago_write_page[256];
+
+// Slow-path I/O handlers (called by the inline accessors only when the
+// page pointer is NULL). Defined in tamago_memory.c.
+uint8_t tamago_io_read(uint16_t addr);
+void    tamago_io_write(uint16_t addr, uint8_t value);
+
+// Force inlining: with -Os Pebble's default optimisation level, plain
+// `static inline` is only a hint and the compiler keeps real function
+// calls for many use sites. The memory accessors are called ~3-4 times
+// per 6502 instruction, so a missed inline costs us heavily — make it
+// non-optional.
+#define TAMAGO_INLINE static inline __attribute__((always_inline))
+
+TAMAGO_INLINE uint8_t tamago_read(uint16_t addr)
+{
+  uint8_t *page = tamago_read_page[addr >> 8];
+  if (page) return page[addr & 0xFF];
+  return tamago_io_read(addr);
+}
+
+TAMAGO_INLINE uint16_t tamago_read16(uint16_t addr)
+{
+  uint8_t lo = tamago_read(addr);
+  uint8_t hi = tamago_read((addr + 1) & 0xFFFF);
+  return lo | (hi << 8);
+}
+
+TAMAGO_INLINE void tamago_write(uint16_t addr, uint8_t value)
+{
+  uint8_t *page = tamago_write_page[addr >> 8];
+  if (page) { page[addr & 0xFF] = value; return; }
+  // Only I/O space ($3000-$3FFF) needs the slow path. ROM writes are
+  // marked NULL too — distinguish via the region nibble.
+  if ((addr >> 12) == 0x3) tamago_io_write(addr, value);
+}
 
 // ROM banking
 void tamago_set_rom_bank(uint8_t bank);

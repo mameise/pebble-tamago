@@ -35,9 +35,10 @@
 // of a 256-byte RAM/ROM region OR is NULL to signal "needs slow-path I/O
 // handling" (only $3000-$30FF and its 15 mirrors).
 //
-// Static linkage so the inline accessors in tamago_internal.h can see them.
-static uint8_t *s_read_page[256];
-static uint8_t *s_write_page[256];
+// Global linkage so the inline accessors in tamago_internal.h reach them.
+// Renamed to the public-API names that the header expects.
+uint8_t *tamago_read_page[256];
+uint8_t *tamago_write_page[256];
 
 // Helper: install the same pointer over a contiguous range of pages.
 static void map_pages(uint8_t **table, int first_page, int n_pages, uint8_t *base)
@@ -50,40 +51,31 @@ static void map_pages(uint8_t **table, int first_page, int n_pages, uint8_t *bas
 // Rebuild the entire page table. Called on init and on every ROM bank switch.
 static void rebuild_page_table(void)
 {
-  // $0000-$0FFF — Work RAM (1.5 KB) mirrored. The 16 pages of this region
-  // map to wram pages [0,1,2,3,4,5, 0,1,2,3,4,5, 0,1,2,3]. We can do this
-  // explicitly per page since we have a small loop.
+  // $0000-$0FFF — Work RAM (1.5 KB) mirrored.
   for (int p = 0; p < 16; p++) {
     int wram_page = p % 6;
-    s_read_page[p]  = g_sys->wram + wram_page * 0x100;
-    s_write_page[p] = g_sys->wram + wram_page * 0x100;
+    tamago_read_page[p]  = g_sys->wram + wram_page * 0x100;
+    tamago_write_page[p] = g_sys->wram + wram_page * 0x100;
   }
-
-  // $1000-$2FFF — Display RAM (512 B) mirrored across 32 pages. Pages
-  // 0x10..0x2F each map to DRAM page (p & 1) — since DRAM is 2 pages.
+  // $1000-$2FFF — Display RAM (512 B) mirrored across 32 pages.
   for (int p = 0x10; p < 0x30; p++) {
-    s_read_page[p]  = g_sys->dram + (p & 1) * 0x100;
-    s_write_page[p] = g_sys->dram + (p & 1) * 0x100;
+    tamago_read_page[p]  = g_sys->dram + (p & 1) * 0x100;
+    tamago_write_page[p] = g_sys->dram + (p & 1) * 0x100;
   }
-
-  // $3000-$3FFF — I/O registers. All 16 pages mirror to cpureg[0..255].
-  // BUT we can't use a single pointer because reads/writes need register-
-  // specific handlers. Mark NULL → slow path.
+  // $3000-$3FFF — I/O registers. NULL = slow path.
   for (int p = 0x30; p < 0x40; p++) {
-    s_read_page[p]  = NULL;
-    s_write_page[p] = NULL;
+    tamago_read_page[p]  = NULL;
+    tamago_write_page[p] = NULL;
   }
-
-  // $4000-$BFFF — Banked ROM (32 KB = 128 pages). Read-only.
+  // $4000-$BFFF — Banked ROM.
   for (int p = 0x40; p < 0xC0; p++) {
-    s_read_page[p]  = g_sys->rom_bank_buf + (p - 0x40) * 0x100;
-    s_write_page[p] = NULL;  // writes ignored (ROM)
+    tamago_read_page[p]  = g_sys->rom_bank_buf + (p - 0x40) * 0x100;
+    tamago_write_page[p] = NULL;
   }
-
-  // $C000-$FFFF — Static ROM (16 KB = 64 pages). Read-only.
+  // $C000-$FFFF — Static ROM.
   for (int p = 0xC0; p < 0x100; p++) {
-    s_read_page[p]  = g_sys->static_rom + (p - 0xC0) * 0x100;
-    s_write_page[p] = NULL;  // writes ignored (ROM)
+    tamago_read_page[p]  = g_sys->static_rom + (p - 0xC0) * 0x100;
+    tamago_write_page[p] = NULL;
   }
 }
 
@@ -194,8 +186,10 @@ static uint8_t io_read_portb(uint8_t reg)
   return (mask & g_sys->cpureg[reg]) | (~mask & eeprom_out);
 }
 
-// Slow-path I/O read — called only when read_page[page] is NULL.
-static uint8_t io_read(uint16_t addr)
+// Slow-path I/O read — called only when tamago_read_page[page] is NULL.
+// Renamed from io_read to tamago_io_read so the public inline in
+// tamago_internal.h can call it.
+uint8_t tamago_io_read(uint16_t addr)
 {
   uint8_t reg = addr & 0xFF;
   switch (reg) {
@@ -205,8 +199,8 @@ static uint8_t io_read(uint16_t addr)
   }
 }
 
-// Slow-path I/O write — called only when write_page[page] is NULL.
-static void io_write(uint16_t addr, uint8_t value)
+// Slow-path I/O write — called only when tamago_write_page[page] is NULL.
+void tamago_io_write(uint16_t addr, uint8_t value)
 {
   uint8_t reg = addr & 0xFF;
   switch (reg) {
@@ -221,37 +215,6 @@ static void io_write(uint16_t addr, uint8_t value)
       g_sys->cpureg[reg] = value;
       break;
   }
-}
-
-// ----- Public memory accessors --------------------------------------------
-//
-// Hot path. Each call is one page lookup + one byte load. The compiler
-// should inline these aggressively from tamago_cpu.c since they live in
-// the same translation unit only if we merge — for now they're function
-// calls but each is just ~5 instructions.
-
-uint8_t tamago_read(uint16_t addr)
-{
-  uint8_t *page = s_read_page[addr >> 8];
-  if (page) return page[addr & 0xFF];
-  // Slow path: only I/O space ($3000-$30FF mirrored).
-  return io_read(addr);
-}
-
-uint16_t tamago_read16(uint16_t addr)
-{
-  uint8_t lo = tamago_read(addr);
-  uint8_t hi = tamago_read((addr + 1) & 0xFFFF);
-  return lo | (hi << 8);
-}
-
-void tamago_write(uint16_t addr, uint8_t value)
-{
-  uint8_t *page = s_write_page[addr >> 8];
-  if (page) { page[addr & 0xFF] = value; return; }
-  // Slow path: I/O space, or ROM (write ignored).
-  if ((addr >> 12) == 0x3) io_write(addr, value);
-  // else: ROM — silently ignore.
 }
 
 // ----- IRQ / NMI dispatch helpers ----------------------------------------
