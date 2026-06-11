@@ -120,9 +120,25 @@ static void step_tick(void *data)
   s_step_timer = NULL;
   if (!s_running) return;
 
+  // Time the step so we can see how many real ms we spend emulating.
+  // time_ms() returns milliseconds since some epoch, wraps at 2^32.
+  time_t epoch_s; uint16_t epoch_ms;
+  time_ms(&epoch_s, &epoch_ms);
+  uint32_t t0 = (uint32_t)epoch_s * 1000 + epoch_ms;
+
   // Run one frame's worth of cycles.
   uint32_t spent = tamago_step_cycles(EMU_CYCLES_PER_FRAME);
   s_total_steps += spent;
+
+  time_ms(&epoch_s, &epoch_ms);
+  uint32_t t1 = (uint32_t)epoch_s * 1000 + epoch_ms;
+  uint32_t step_ms = t1 - t0;
+
+  // Track running totals for a rolling rate measurement.
+  static uint32_t bucket_cycles = 0;
+  static uint32_t bucket_ms = 0;
+  bucket_cycles += spent;
+  bucket_ms     += step_ms;
 
   // Update status line (don't do this every frame — keep it cheap).
   static uint32_t status_ctr = 0;
@@ -133,17 +149,31 @@ static void step_tick(void *data)
     text_layer_set_text(s_status_layer, s_status_text);
   }
 
-  // Debug log every ~3 seconds: dump CPU state + DRAM activity.
+  // Debug log every ~3 seconds: dump CPU state + perf info.
   static uint32_t dbg_ctr = 0;
   if (++dbg_ctr >= EMU_FPS * 3) {
     dbg_ctr = 0;
     uint16_t pc; uint8_t a, x, y, s, bank;
     tamago_debug_get_state(&pc, &a, &x, &y, &s, &bank);
     uint16_t nz = tamago_debug_dram_nonzero_count();
+    // bucket_cycles emulated cycles in bucket_ms real ms
+    // → effective emulated MHz = bucket_cycles / (bucket_ms * 1000)
+    // → speed ratio vs 4MHz target = effective / 4
+    uint32_t khz_eff = bucket_ms ? (bucket_cycles / bucket_ms) : 0;
     APP_LOG(APP_LOG_LEVEL_INFO,
-            "tamago state: PC=$%04x A=$%02x X=$%02x Y=$%02x S=$%02x bank=%d dram_nz=%u/512",
-            pc, a, x, y, s, bank, nz);
+            "tamago: PC=$%04x bank=%d nz=%u/512 | perf: %lu cyc in %lu ms = %lu kHz (target 4000 kHz)",
+            pc, bank, nz,
+            (unsigned long)bucket_cycles,
+            (unsigned long)bucket_ms,
+            (unsigned long)khz_eff);
+    bucket_cycles = 0;
+    bucket_ms     = 0;
   }
+
+  // Redraw and schedule next frame.
+  if (s_tama_layer) layer_mark_dirty(s_tama_layer);
+  s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
+}
 
   // Redraw and schedule next frame.
   if (s_tama_layer) layer_mark_dirty(s_tama_layer);
