@@ -74,18 +74,41 @@ uint8_t tamago_step_one(void)
 static uint32_t s_tbh_accumulator = 0;
 #define TBH_RATE (TAMAGO_CLOCK_RATE / 2)
 
+// "Video" IRQ/NMI fire rate.
+//
+// On real Tama-Go hardware these are driven by the LCD controller, which
+// runs at roughly 60 Hz. We step the emulator 20× per second, so we need
+// to fire 3 sub-frames worth of NMI/IRQ per call to match the rate the
+// ROM expects.
+//
+// Symptoms when this is wrong: the Tama's clock runs slow because the
+// game counts video frames to measure real time (e.g. "60 frames = 1
+// second"). At 20 Hz it would clock at 1/3 speed.
+#define VIDEO_FIRES_PER_FRAME 3
+
 uint32_t tamago_step_cycles(uint32_t target_cycles)
 {
   if (!g_initialised) return 0;
 
-  tamago_fire_irq(10);
-  tamago_fire_nmi(6);
-
+  // Split the requested cycles into VIDEO_FIRES_PER_FRAME chunks so the
+  // ROM sees the video interrupt at roughly the hardware rate.
+  uint32_t per_chunk = target_cycles / VIDEO_FIRES_PER_FRAME;
   uint32_t spent = 0;
-  while (spent < target_cycles) {
-    spent += tamago_cpu_step();
+
+  for (int chunk = 0; chunk < VIDEO_FIRES_PER_FRAME; chunk++) {
+    tamago_fire_irq(10);
+    tamago_fire_nmi(6);
+
+    uint32_t chunk_target = (chunk == VIDEO_FIRES_PER_FRAME - 1)
+                              ? target_cycles   // last chunk takes the rest
+                              : (spent + per_chunk);
+    while (spent < chunk_target) {
+      spent += tamago_cpu_step();
+    }
   }
 
+  // 2 Hz timer (IRQ 13) — the "TBH" counter that drives the game's
+  // real-time clock. Independent of the video IRQ rate.
   s_tbh_accumulator += spent;
   while (s_tbh_accumulator >= TBH_RATE) {
     tamago_fire_irq(13);
