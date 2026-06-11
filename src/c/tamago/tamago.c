@@ -139,29 +139,24 @@ static const uint16_t LCD_ROW_OFFSETS[31] = {
 void tamago_get_display(uint8_t *out)
 {
   if (!g_sys || !out) return;
-  // Walk 31 rows × 64 columns. Each byte holds 4 pixels (2 bits each).
-  // Row 32 of the hardware buffer is unused/duplicate — we output 31
-  // rows. Caller can either render 31 rows directly or pad row 32 to a
-  // copy of row 31.
-  for (int y = 0; y < 31; y++) {
+  // 31 rows × 48 pixels each. Each byte holds 4 pixels (2 bits each), so
+  // we read 12 bytes per row.
+  //
+  // The LCD_ROW_OFFSETS table places consecutive rows only 12 bytes apart
+  // in dram, even though one row of 64 segments would need 16 bytes. The
+  // hardware really only exposes 48 valid pixels per row; the JS demo
+  // hides this by drawing into a 48-px-wide canvas (the overspill folds
+  // into the next row and gets overwritten). We just stop at 48 pixels.
+  for (int y = 0; y < TAMAGO_LCD_HEIGHT; y++) {
     uint16_t base = LCD_ROW_OFFSETS[y] % TAMAGO_DRAM_SIZE;
-    // Wrap-protect: in the original, DRAM is mirrored, so offsets
-    // larger than 0x200 wrap. Mod ensures we don't read past the buffer.
-    for (int x = 0; x < 64; x += 4) {
+    for (int x = 0; x < TAMAGO_LCD_WIDTH; x += 4) {
       uint8_t d = g_sys->dram[base++];
-      // The JS extracts 4 pixels in order, MSB-pair first: bits 7-6, 5-4, 3-2, 1-0.
       out[y * TAMAGO_LCD_WIDTH + x + 0] = (d >> 6) & 0x3;
       out[y * TAMAGO_LCD_WIDTH + x + 1] = (d >> 4) & 0x3;
       out[y * TAMAGO_LCD_WIDTH + x + 2] = (d >> 2) & 0x3;
       out[y * TAMAGO_LCD_WIDTH + x + 3] = (d >> 0) & 0x3;
     }
   }
-  // Last row (y=31): we just duplicate row 30 so the caller can render a
-  // full 32-row buffer without seeing garbage. The hardware actually has
-  // 32 commons but the JS emulator only renders 31. To stay safe.
-  memcpy(out + 31 * TAMAGO_LCD_WIDTH,
-         out + 30 * TAMAGO_LCD_WIDTH,
-         TAMAGO_LCD_WIDTH);
 }
 
 // ----- Buttons ------------------------------------------------------------

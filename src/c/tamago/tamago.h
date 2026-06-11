@@ -24,9 +24,18 @@
 
 #include <pebble.h>
 
-// Display dimensions (native Tama-Go hardware)
-#define TAMAGO_LCD_WIDTH    64
-#define TAMAGO_LCD_HEIGHT   32
+// Display dimensions (native Tama-Go hardware).
+//
+// The display is 48 pixels wide × 31 pixels high — this comes from the
+// HTML template in the JS reference (canvas width=48 height=31). Although
+// the hardware has 64 segments × 32 commons, the addressing scheme in
+// _dram only gives meaningful pixels in the first 48 of each row; the
+// remaining 16 are aliased into the start of the next row's bytes.
+// The JS emulator handles this by drawing into a 48-px-wide canvas — the
+// 16 "extra" pixels per row spill into the next row and get overwritten.
+// In our C port we just clamp to 48 explicitly.
+#define TAMAGO_LCD_WIDTH    48
+#define TAMAGO_LCD_HEIGHT   31
 
 // 4 grayscale levels per pixel (2 bits each)
 #define TAMAGO_PALETTE_SIZE 4
