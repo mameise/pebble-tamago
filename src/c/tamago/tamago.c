@@ -80,12 +80,38 @@ uint8_t tamago_step_one(void)
   return tamago_cpu_step();
 }
 
+// Counter for periodic IRQ/NMI fires. The JS emulator does these in
+// step_realtime() — once per call (~per frame). We mirror that by firing
+// them once per tamago_step_cycles call.
+//
+// The exact rates aren't documented in the JS source ("HACK" comments):
+//   fire_irq(13)  — every CLOCK_RATE/2 cycles (2 Hz). This is the "TBH"
+//                   timer that drives in-game time / animation tick.
+//   fire_irq(10)  — once per refresh call (effectively video frame rate)
+//   fire_nmi(6)   — once per refresh call (frame interrupt)
+static uint32_t s_tbh_accumulator = 0;
+#define TBH_RATE (TAMAGO_CLOCK_RATE / 2)   // 2 Hz
+
 uint32_t tamago_step_cycles(uint32_t target_cycles)
 {
   if (!g_sys) return 0;
+
+  // Fire the per-frame "video" IRQ and NMI before stepping. The ROM uses
+  // these to drive its main loop and screen refresh.
+  tamago_fire_irq(10);
+  tamago_fire_nmi(6);
+
   uint32_t spent = 0;
   while (spent < target_cycles) {
     spent += tamago_cpu_step();
+  }
+
+  // 2 Hz timer: accumulate cycles, fire IRQ(13) when we cross a TBH_RATE
+  // boundary. This drives the game's slow timer (heartbeat, etc).
+  s_tbh_accumulator += spent;
+  while (s_tbh_accumulator >= TBH_RATE) {
+    tamago_fire_irq(13);
+    s_tbh_accumulator -= TBH_RATE;
   }
   return spent;
 }
