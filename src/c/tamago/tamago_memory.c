@@ -40,14 +40,6 @@
 uint8_t *tamago_read_page[256];
 uint8_t *tamago_write_page[256];
 
-// Helper: install the same pointer over a contiguous range of pages.
-static void map_pages(uint8_t **table, int first_page, int n_pages, uint8_t *base)
-{
-  for (int i = 0; i < n_pages; i++) {
-    table[first_page + i] = base ? (base + i * 0x100) : NULL;
-  }
-}
-
 // Rebuild the entire page table. Called on init and on every ROM bank switch.
 static void rebuild_page_table(void)
 {
