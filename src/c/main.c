@@ -175,11 +175,6 @@ static void step_tick(void *data)
   s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
 }
 
-  // Redraw and schedule next frame.
-  if (s_tama_layer) layer_mark_dirty(s_tama_layer);
-  s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
-}
-
 // ----- Button handlers ----
 //
 // Tama-Go has 3 buttons: A, B, C. Map to Pebble's Up/Select/Down.
