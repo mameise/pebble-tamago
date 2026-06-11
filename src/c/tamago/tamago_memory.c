@@ -54,13 +54,13 @@ static void rebuild_page_table(void)
   // $0000-$0FFF — Work RAM (1.5 KB) mirrored.
   for (int p = 0; p < 16; p++) {
     int wram_page = p % 6;
-    tamago_read_page[p]  = g_sys->wram + wram_page * 0x100;
-    tamago_write_page[p] = g_sys->wram + wram_page * 0x100;
+    tamago_read_page[p]  = g_wram + wram_page * 0x100;
+    tamago_write_page[p] = g_wram + wram_page * 0x100;
   }
   // $1000-$2FFF — Display RAM (512 B) mirrored across 32 pages.
   for (int p = 0x10; p < 0x30; p++) {
-    tamago_read_page[p]  = g_sys->dram + (p & 1) * 0x100;
-    tamago_write_page[p] = g_sys->dram + (p & 1) * 0x100;
+    tamago_read_page[p]  = g_dram + (p & 1) * 0x100;
+    tamago_write_page[p] = g_dram + (p & 1) * 0x100;
   }
   // $3000-$3FFF — I/O registers. NULL = slow path.
   for (int p = 0x30; p < 0x40; p++) {
@@ -69,12 +69,12 @@ static void rebuild_page_table(void)
   }
   // $4000-$BFFF — Banked ROM.
   for (int p = 0x40; p < 0xC0; p++) {
-    tamago_read_page[p]  = g_sys->rom_bank_buf + (p - 0x40) * 0x100;
+    tamago_read_page[p]  = g_rom_bank_buf + (p - 0x40) * 0x100;
     tamago_write_page[p] = NULL;
   }
   // $C000-$FFFF — Static ROM.
   for (int p = 0xC0; p < 0x100; p++) {
-    tamago_read_page[p]  = g_sys->static_rom + (p - 0xC0) * 0x100;
+    tamago_read_page[p]  = g_static_rom + (p - 0xC0) * 0x100;
     tamago_write_page[p] = NULL;
   }
 }
@@ -96,7 +96,7 @@ bool tamago_load_static_rom(void)
     return false;
   }
 
-  size_t n = resource_load_byte_range(h, 0, g_sys->static_rom,
+  size_t n = resource_load_byte_range(h, 0, g_static_rom,
                                       TAMAGO_STATIC_ROM_SIZE);
   if (n != TAMAGO_STATIC_ROM_SIZE) {
     APP_LOG(APP_LOG_LEVEL_ERROR,
@@ -111,13 +111,13 @@ bool tamago_load_static_rom(void)
 
   // Build IRQ vector table from $FFC0-$FFDF.
   for (int i = 0; i < 16; i++) {
-    uint16_t lo = g_sys->static_rom[0x3FC0 + i * 2];
-    uint16_t hi = g_sys->static_rom[0x3FC0 + i * 2 + 1];
-    g_sys->irq_vectors[i] = lo | (hi << 8);
+    uint16_t lo = g_static_rom[0x3FC0 + i * 2];
+    uint16_t hi = g_static_rom[0x3FC0 + i * 2 + 1];
+    g_irq_vectors[i] = lo | (hi << 8);
   }
 
-  g_sys->rom_loaded = true;
-  g_sys->rom_resource = h;
+  g_rom_loaded = true;
+  g_rom_resource = h;
 
   // Build the page table now that all backing buffers exist.
   rebuild_page_table();
@@ -127,19 +127,19 @@ bool tamago_load_static_rom(void)
 void tamago_set_rom_bank(uint8_t bank)
 {
   uint8_t actual = bank % 20;
-  if (actual == g_sys->rom_bank_id && g_sys->rom_loaded) return;
-  if (!g_sys->rom_loaded) return;
+  if (actual == g_rom_bank_id && g_rom_loaded) return;
+  if (!g_rom_loaded) return;
 
   size_t offset = (size_t)actual * TAMAGO_ROM_BANK_SIZE;
-  size_t n = resource_load_byte_range(g_sys->rom_resource, offset,
-                                      g_sys->rom_bank_buf,
+  size_t n = resource_load_byte_range(g_rom_resource, offset,
+                                      g_rom_bank_buf,
                                       TAMAGO_ROM_BANK_SIZE);
   if (n != TAMAGO_ROM_BANK_SIZE) {
     APP_LOG(APP_LOG_LEVEL_ERROR,
             "tamago: bank %u short read (%u/%u)",
             actual, (unsigned)n, (unsigned)TAMAGO_ROM_BANK_SIZE);
   }
-  g_sys->rom_bank_id = actual;
+  g_rom_bank_id = actual;
   // The bank buffer pointer hasn't changed — only its contents — so the
   // page table is still valid. No rebuild needed.
 }
@@ -148,42 +148,42 @@ void tamago_set_rom_bank(uint8_t bank)
 
 static void io_write_bank(uint8_t reg, uint8_t value)
 {
-  g_sys->cpureg[reg] = value;
+  g_cpureg[reg] = value;
   tamago_set_rom_bank(value);
 }
 
 static void io_write_int_flag(uint8_t reg, uint8_t value)
 {
-  g_sys->cpureg[reg] &= ~value;
+  g_cpureg[reg] &= ~value;
 }
 
 static void io_write_porta(uint8_t reg, uint8_t value)
 {
-  g_sys->cpureg[reg] = value;
+  g_cpureg[reg] = value;
 }
 
 static uint8_t io_read_porta(uint8_t reg)
 {
   (void)reg;
-  uint8_t mask  = g_sys->cpureg[0x11];
-  uint8_t value = g_sys->cpureg[0x12];
+  uint8_t mask  = g_cpureg[0x11];
+  uint8_t value = g_cpureg[0x12];
   uint8_t spi_power = mask & value & 0x10;
   uint8_t inserted_figure = 0;
-  uint8_t input = g_sys->keys | ((spi_power ? 0 : inserted_figure) << 5);
+  uint8_t input = g_keys | ((spi_power ? 0 : inserted_figure) << 5);
   return (mask & value) | (~mask & input);
 }
 
 static void io_write_portb(uint8_t reg, uint8_t value)
 {
-  g_sys->cpureg[reg] = value;
+  g_cpureg[reg] = value;
   // EEPROM hookup later.
 }
 
 static uint8_t io_read_portb(uint8_t reg)
 {
-  uint8_t mask = g_sys->cpureg[0x15];
+  uint8_t mask = g_cpureg[0x15];
   uint8_t eeprom_out = 1;
-  return (mask & g_sys->cpureg[reg]) | (~mask & eeprom_out);
+  return (mask & g_cpureg[reg]) | (~mask & eeprom_out);
 }
 
 // Slow-path I/O read — called only when tamago_read_page[page] is NULL.
@@ -195,7 +195,7 @@ uint8_t tamago_io_read(uint16_t addr)
   switch (reg) {
     case 0x12: return io_read_porta(reg);
     case 0x16: return io_read_portb(reg);
-    default:   return g_sys->cpureg[reg];
+    default:   return g_cpureg[reg];
   }
 }
 
@@ -212,7 +212,7 @@ void tamago_io_write(uint16_t addr, uint8_t value)
     case 0x73: io_write_int_flag(reg, value); break;
     case 0x74: io_write_int_flag(reg, value); break;
     default:
-      g_sys->cpureg[reg] = value;
+      g_cpureg[reg] = value;
       break;
   }
 }
@@ -221,13 +221,13 @@ void tamago_io_write(uint16_t addr, uint8_t value)
 
 void tamago_fire_irq(uint8_t i)
 {
-  uint16_t mask = (g_sys->cpureg[0x70] << 8) | g_sys->cpureg[0x71];
+  uint16_t mask = (g_cpureg[0x70] << 8) | g_cpureg[0x71];
   if (!((0x8000 >> i) & mask)) return;
-  g_sys->cpureg[0x73 + (i >> 3)] |= 0x80 >> (i & 7);
+  g_cpureg[0x73 + (i >> 3)] |= 0x80 >> (i & 7);
 }
 
 void tamago_fire_nmi(uint8_t i)
 {
-  if (~g_sys->cpureg[0x76] & (0x80 >> i)) return;
+  if (~g_cpureg[0x76] & (0x80 >> i)) return;
   tamago_cpu_nmi();
 }

@@ -1,74 +1,65 @@
 /*
  * tamago.c - top-level emulator integration
  *
- * Provides the public API declared in tamago.h:
- *   - tamago_init / tamago_release
- *   - tamago_reset
- *   - tamago_step_cycles / tamago_step_one
- *   - tamago_get_display
- *   - tamago_set_buttons
- *   - tamago_serialize_state / tamago_deserialize_state
+ * Provides the public API declared in tamago.h.
  */
 
 #include "tamago_internal.h"
 
-// Global system pointer. Declared extern in tamago_internal.h.
-tamago_system_t *g_sys = NULL;
+// ----- Global state definitions ------------------------------------------
+//
+// Declared extern in tamago_internal.h. Living as plain globals (rather
+// than fields of a g_sys struct) lets the compiler resolve addresses at
+// compile time and skip a pointer-indirection on every hot-path memory
+// access. ~52 KB total, all in .bss.
+
+cpu6502_t g_cpu;
+uint8_t   g_wram[TAMAGO_WRAM_SIZE];
+uint8_t   g_dram[TAMAGO_DRAM_SIZE];
+uint8_t   g_cpureg[TAMAGO_CPUREG_SIZE];
+uint8_t   g_rom_bank_buf[TAMAGO_ROM_BANK_SIZE];
+uint8_t   g_static_rom[TAMAGO_STATIC_ROM_SIZE];
+uint16_t  g_irq_vectors[16];
+uint8_t   g_rom_bank_id;
+bool      g_rom_loaded;
+uint8_t   g_keys;
+ResHandle g_rom_resource;
+bool      g_initialised;
 
 // ----- Init / Release -----------------------------------------------------
 
 bool tamago_init(void)
 {
-  if (g_sys) {
+  if (g_initialised) {
     APP_LOG(APP_LOG_LEVEL_WARNING, "tamago_init: already initialised");
     return true;
   }
+  memset(&g_cpu, 0, sizeof(g_cpu));
+  memset(g_wram, 0, sizeof(g_wram));
+  memset(g_dram, 0, sizeof(g_dram));
+  memset(g_cpureg, 0, sizeof(g_cpureg));
+  g_keys = 0xFF;
+  g_rom_bank_id = 0xFF;
+  g_rom_loaded = false;
 
-  g_sys = (tamago_system_t *)malloc(sizeof(tamago_system_t));
-  if (!g_sys) {
-    APP_LOG(APP_LOG_LEVEL_ERROR,
-            "tamago_init: malloc failed (%u bytes)",
-            (unsigned)sizeof(tamago_system_t));
-    return false;
-  }
-  memset(g_sys, 0, sizeof(tamago_system_t));
-
-  // Buttons in idle (pull-up) state — bit set = not pressed.
-  g_sys->keys = 0xFF;
-
-  // Mark "no bank loaded yet" with a sentinel value so the first
-  // tamago_set_rom_bank() call doesn't short-circuit.
-  g_sys->rom_bank_id = 0xFF;
-
-  // Load the static (high) ROM and build the IRQ vector table.
-  if (!tamago_load_static_rom()) {
-    free(g_sys);
-    g_sys = NULL;
-    return false;
-  }
-
-  // Load bank 0 by default; the ROM's reset code may switch immediately.
+  if (!tamago_load_static_rom()) return false;
   tamago_set_rom_bank(0);
-
-  // Reset CPU (jumps to the reset vector at $FFFC).
   tamago_cpu_reset();
 
+  g_initialised = true;
   APP_LOG(APP_LOG_LEVEL_INFO,
-          "tamago_init: ready, PC=$%04x, heap used ~%u bytes",
-          g_sys->cpu.pc, (unsigned)sizeof(tamago_system_t));
+          "tamago_init: ready, PC=$%04x", g_cpu.pc);
   return true;
 }
 
 void tamago_release(void)
 {
-  if (!g_sys) return;
-  free(g_sys);
-  g_sys = NULL;
+  g_initialised = false;
 }
 
 void tamago_reset(void)
 {
-  if (!g_sys) return;
+  if (!g_initialised) return;
   tamago_cpu_reset();
 }
 
@@ -76,28 +67,17 @@ void tamago_reset(void)
 
 uint8_t tamago_step_one(void)
 {
-  if (!g_sys) return 0;
+  if (!g_initialised) return 0;
   return tamago_cpu_step();
 }
 
-// Counter for periodic IRQ/NMI fires. The JS emulator does these in
-// step_realtime() — once per call (~per frame). We mirror that by firing
-// them once per tamago_step_cycles call.
-//
-// The exact rates aren't documented in the JS source ("HACK" comments):
-//   fire_irq(13)  — every CLOCK_RATE/2 cycles (2 Hz). This is the "TBH"
-//                   timer that drives in-game time / animation tick.
-//   fire_irq(10)  — once per refresh call (effectively video frame rate)
-//   fire_nmi(6)   — once per refresh call (frame interrupt)
 static uint32_t s_tbh_accumulator = 0;
-#define TBH_RATE (TAMAGO_CLOCK_RATE / 2)   // 2 Hz
+#define TBH_RATE (TAMAGO_CLOCK_RATE / 2)
 
 uint32_t tamago_step_cycles(uint32_t target_cycles)
 {
-  if (!g_sys) return 0;
+  if (!g_initialised) return 0;
 
-  // Fire the per-frame "video" IRQ and NMI before stepping. The ROM uses
-  // these to drive its main loop and screen refresh.
   tamago_fire_irq(10);
   tamago_fire_nmi(6);
 
@@ -106,8 +86,6 @@ uint32_t tamago_step_cycles(uint32_t target_cycles)
     spent += tamago_cpu_step();
   }
 
-  // 2 Hz timer: accumulate cycles, fire IRQ(13) when we cross a TBH_RATE
-  // boundary. This drives the game's slow timer (heartbeat, etc).
   s_tbh_accumulator += spent;
   while (s_tbh_accumulator >= TBH_RATE) {
     tamago_fire_irq(13);
@@ -117,14 +95,7 @@ uint32_t tamago_step_cycles(uint32_t target_cycles)
 }
 
 // ----- Display ------------------------------------------------------------
-//
-// The DRAM stores 2 bits per pixel, packed 4 pixels per byte. The order
-// of bytes within DRAM is given by LCD_ORDER in the JS code — the
-// hardware's scan order is asymmetric and skips a 32-byte block in the
-// middle. We mirror that here.
 
-// LCD scan order (from tamagotchi.js's LCD_ORDER array).
-// Each entry is the DRAM offset for one row of 16 bytes (= 64 pixels).
 static const uint16_t LCD_ROW_OFFSETS[31] = {
   0x0C0, 0x0CC, 0x0D8, 0x0E4,
   0x0F0, 0x0FC, 0x108, 0x114,
@@ -138,19 +109,11 @@ static const uint16_t LCD_ROW_OFFSETS[31] = {
 
 void tamago_get_display(uint8_t *out)
 {
-  if (!g_sys || !out) return;
-  // 31 rows × 48 pixels each. Each byte holds 4 pixels (2 bits each), so
-  // we read 12 bytes per row.
-  //
-  // The LCD_ROW_OFFSETS table places consecutive rows only 12 bytes apart
-  // in dram, even though one row of 64 segments would need 16 bytes. The
-  // hardware really only exposes 48 valid pixels per row; the JS demo
-  // hides this by drawing into a 48-px-wide canvas (the overspill folds
-  // into the next row and gets overwritten). We just stop at 48 pixels.
+  if (!g_initialised || !out) return;
   for (int y = 0; y < TAMAGO_LCD_HEIGHT; y++) {
     uint16_t base = LCD_ROW_OFFSETS[y] % TAMAGO_DRAM_SIZE;
     for (int x = 0; x < TAMAGO_LCD_WIDTH; x += 4) {
-      uint8_t d = g_sys->dram[base++];
+      uint8_t d = g_dram[base++];
       out[y * TAMAGO_LCD_WIDTH + x + 0] = (d >> 6) & 0x3;
       out[y * TAMAGO_LCD_WIDTH + x + 1] = (d >> 4) & 0x3;
       out[y * TAMAGO_LCD_WIDTH + x + 2] = (d >> 2) & 0x3;
@@ -163,121 +126,82 @@ void tamago_get_display(uint8_t *out)
 
 void tamago_set_buttons(uint8_t mask)
 {
-  if (!g_sys) return;
-  // External convention: bit set = pressed.
-  // Internal convention: bit set = NOT pressed (pull-up).
-  // The hardware has 4 buttons mapped to the low 4 bits.
+  if (!g_initialised) return;
   uint8_t lo = ~mask & 0x0F;
-  // Keep the upper 4 bits at their pull-up default (always 1).
-  g_sys->keys = lo | 0xF0;
+  g_keys = lo | 0xF0;
 }
 
-// ----- Debug ---------------------------------------------------------------
+// ----- Debug --------------------------------------------------------------
 
 void tamago_debug_get_state(uint16_t *pc, uint8_t *a, uint8_t *x, uint8_t *y,
                             uint8_t *s, uint8_t *bank)
 {
-  if (!g_sys) return;
-  if (pc)   *pc   = g_sys->cpu.pc;
-  if (a)    *a    = g_sys->cpu.a;
-  if (x)    *x    = g_sys->cpu.x;
-  if (y)    *y    = g_sys->cpu.y;
-  if (s)    *s    = g_sys->cpu.s;
-  if (bank) *bank = g_sys->rom_bank_id;
+  if (!g_initialised) return;
+  if (pc)   *pc   = g_cpu.pc;
+  if (a)    *a    = g_cpu.a;
+  if (x)    *x    = g_cpu.x;
+  if (y)    *y    = g_cpu.y;
+  if (s)    *s    = g_cpu.s;
+  if (bank) *bank = g_rom_bank_id;
 }
 
 bool tamago_debug_dram_dirty(void)
 {
-  if (!g_sys) return false;
-  for (int i = 0; i < TAMAGO_DRAM_SIZE; i++) {
-    if (g_sys->dram[i]) return true;
-  }
+  if (!g_initialised) return false;
+  for (int i = 0; i < TAMAGO_DRAM_SIZE; i++) if (g_dram[i]) return true;
   return false;
 }
 
 uint16_t tamago_debug_dram_nonzero_count(void)
 {
-  if (!g_sys) return 0;
+  if (!g_initialised) return 0;
   uint16_t n = 0;
-  for (int i = 0; i < TAMAGO_DRAM_SIZE; i++) {
-    if (g_sys->dram[i]) n++;
-  }
+  for (int i = 0; i < TAMAGO_DRAM_SIZE; i++) if (g_dram[i]) n++;
   return n;
 }
 
 // ----- Save state ---------------------------------------------------------
 
-// Serialised state layout:
-//   uint32_t magic      ("TAMG")
-//   uint8_t  version    (current = 1)
-//   uint8_t  reserved[3]
-//   cpu6502_t cpu
-//   uint8_t  cpureg[256]
-//   uint8_t  wram[1536]
-//   uint8_t  dram[512]
-//   uint8_t  rom_bank_id
-//   uint8_t  keys
-// EEPROM is NOT serialised here — it lives in Pebble persist storage
-// permanently.
-#define TAMAGO_SAVE_MAGIC   0x54414D47  // "TAMG"
+#define TAMAGO_SAVE_MAGIC   0x54414D47
 #define TAMAGO_SAVE_VERSION 1
-
 #define TAMAGO_SAVE_SIZE                                                     \
-  (4 + 4 +                                                                   \
-   sizeof(cpu6502_t) +                                                       \
-   TAMAGO_CPUREG_SIZE +                                                      \
-   TAMAGO_WRAM_SIZE +                                                        \
-   TAMAGO_DRAM_SIZE +                                                        \
-   1 + 1)
+  (4 + 4 + sizeof(cpu6502_t) +                                               \
+   TAMAGO_CPUREG_SIZE + TAMAGO_WRAM_SIZE + TAMAGO_DRAM_SIZE + 1 + 1)
 
 uint32_t tamago_serialize_state(uint8_t *buf, uint32_t bufsize)
 {
   if (!buf || bufsize < TAMAGO_SAVE_SIZE) return TAMAGO_SAVE_SIZE;
-  if (!g_sys) return 0;
-
+  if (!g_initialised) return 0;
   uint8_t *p = buf;
   uint32_t magic = TAMAGO_SAVE_MAGIC;
   memcpy(p, &magic, 4); p += 4;
   *p++ = TAMAGO_SAVE_VERSION;
   *p++ = 0; *p++ = 0; *p++ = 0;
-  memcpy(p, &g_sys->cpu, sizeof(cpu6502_t)); p += sizeof(cpu6502_t);
-  memcpy(p, g_sys->cpureg, TAMAGO_CPUREG_SIZE); p += TAMAGO_CPUREG_SIZE;
-  memcpy(p, g_sys->wram, TAMAGO_WRAM_SIZE);     p += TAMAGO_WRAM_SIZE;
-  memcpy(p, g_sys->dram, TAMAGO_DRAM_SIZE);     p += TAMAGO_DRAM_SIZE;
-  *p++ = g_sys->rom_bank_id;
-  *p++ = g_sys->keys;
+  memcpy(p, &g_cpu, sizeof(cpu6502_t)); p += sizeof(cpu6502_t);
+  memcpy(p, g_cpureg, TAMAGO_CPUREG_SIZE); p += TAMAGO_CPUREG_SIZE;
+  memcpy(p, g_wram, TAMAGO_WRAM_SIZE);     p += TAMAGO_WRAM_SIZE;
+  memcpy(p, g_dram, TAMAGO_DRAM_SIZE);     p += TAMAGO_DRAM_SIZE;
+  *p++ = g_rom_bank_id;
+  *p++ = g_keys;
   return (uint32_t)(p - buf);
 }
 
 bool tamago_deserialize_state(const uint8_t *buf, uint32_t bufsize)
 {
-  if (!buf || bufsize < TAMAGO_SAVE_SIZE || !g_sys) return false;
-
+  if (!buf || bufsize < TAMAGO_SAVE_SIZE || !g_initialised) return false;
   const uint8_t *p = buf;
   uint32_t magic;
   memcpy(&magic, p, 4); p += 4;
-  if (magic != TAMAGO_SAVE_MAGIC) {
-    APP_LOG(APP_LOG_LEVEL_WARNING,
-            "tamago_deserialize: bad magic 0x%08lx", (unsigned long)magic);
-    return false;
-  }
+  if (magic != TAMAGO_SAVE_MAGIC) return false;
   uint8_t version = *p++;
-  if (version != TAMAGO_SAVE_VERSION) {
-    APP_LOG(APP_LOG_LEVEL_WARNING,
-            "tamago_deserialize: version %u not supported", version);
-    return false;
-  }
-  p += 3;  // reserved
-  memcpy(&g_sys->cpu, p, sizeof(cpu6502_t)); p += sizeof(cpu6502_t);
-  memcpy(g_sys->cpureg, p, TAMAGO_CPUREG_SIZE); p += TAMAGO_CPUREG_SIZE;
-  memcpy(g_sys->wram, p, TAMAGO_WRAM_SIZE);     p += TAMAGO_WRAM_SIZE;
-  memcpy(g_sys->dram, p, TAMAGO_DRAM_SIZE);     p += TAMAGO_DRAM_SIZE;
+  if (version != TAMAGO_SAVE_VERSION) return false;
+  p += 3;
+  memcpy(&g_cpu, p, sizeof(cpu6502_t)); p += sizeof(cpu6502_t);
+  memcpy(g_cpureg, p, TAMAGO_CPUREG_SIZE); p += TAMAGO_CPUREG_SIZE;
+  memcpy(g_wram, p, TAMAGO_WRAM_SIZE);     p += TAMAGO_WRAM_SIZE;
+  memcpy(g_dram, p, TAMAGO_DRAM_SIZE);     p += TAMAGO_DRAM_SIZE;
   uint8_t saved_bank = *p++;
-  g_sys->keys = *p++;
-
-  // Reload the active ROM bank so the bank cache matches what the CPU
-  // expects.
+  g_keys = *p++;
   tamago_set_rom_bank(saved_bank);
-
   return true;
 }

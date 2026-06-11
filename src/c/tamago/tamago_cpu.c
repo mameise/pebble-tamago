@@ -23,7 +23,7 @@
 #include "tamago_internal.h"
 
 // Convenience pointers to cut down on g_sys-> noise in this file.
-#define CPU (g_sys->cpu)
+#define CPU g_cpu
 
 // Status-flag fields, stored as separate uint8_t for clarity. Non-zero
 // means set; the actual bit values don't matter as long as we use them
@@ -150,7 +150,7 @@ void tamago_cpu_irq(void)
   // Hardware IRQ: look up the highest-priority pending bit in
   // cpureg[$73:$74] (16-bit) and jump to the corresponding vector.
   // The vector indices are 0..15; index 0 is highest priority.
-  uint16_t pending = (g_sys->cpureg[0x73] << 8) | g_sys->cpureg[0x74];
+  uint16_t pending = (g_cpureg[0x73] << 8) | g_cpureg[0x74];
   if (!pending) return;
 
   // Find highest set bit (0..15) via count-leading-zeros.
@@ -163,7 +163,7 @@ void tamago_cpu_irq(void)
   push(CPU.pc >> 8);
   push(CPU.pc & 0xFF);
   push(pack_p());
-  CPU.pc = g_sys->irq_vectors[idx];
+  CPU.pc = g_irq_vectors[idx];
   s_flag_i = 1;
 }
 
@@ -448,11 +448,16 @@ static const uint8_t opcode_cycles[256] = {
   [0xFE] = 7,
 };
 
+// `hot` attribute tells GCC this is a frequently-called function — it
+// optimises it more aggressively (inlining decisions, branch ordering)
+// and places it in a hot code section for better i-cache behaviour.
+uint8_t tamago_cpu_step(void) __attribute__((hot));
+
 uint8_t tamago_cpu_step(void)
 {
   // Fire pending IRQs before fetching the next instruction.
   if (!s_flag_i) {
-    uint16_t pending = (g_sys->cpureg[0x73] << 8) | g_sys->cpureg[0x74];
+    uint16_t pending = (g_cpureg[0x73] << 8) | g_cpureg[0x74];
     if (pending) tamago_cpu_irq();
   }
 
