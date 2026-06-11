@@ -85,6 +85,18 @@ static void step_tick(void *data)
     text_layer_set_text(s_status_layer, s_status_text);
   }
 
+  // Debug log every ~3 seconds: dump CPU state + DRAM activity.
+  static uint32_t dbg_ctr = 0;
+  if (++dbg_ctr >= EMU_FPS * 3) {
+    dbg_ctr = 0;
+    uint16_t pc; uint8_t a, x, y, s, bank;
+    tamago_debug_get_state(&pc, &a, &x, &y, &s, &bank);
+    uint16_t nz = tamago_debug_dram_nonzero_count();
+    APP_LOG(APP_LOG_LEVEL_INFO,
+            "tamago state: PC=$%04x A=$%02x X=$%02x Y=$%02x S=$%02x bank=%d dram_nz=%u/512",
+            pc, a, x, y, s, bank, nz);
+  }
+
   // Redraw and schedule next frame.
   if (s_tama_layer) layer_mark_dirty(s_tama_layer);
   s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
