@@ -73,6 +73,25 @@ extern uint8_t *tamago_write_page[256];
 uint8_t tamago_io_read(uint16_t addr);
 void    tamago_io_write(uint16_t addr, uint8_t value);
 
+// ----- Profiling counters (referenced by the inline read/write below) -----
+//
+// Bumped from the hot path. Cost per increment is one load + add + store
+// (small but nonzero).
+typedef struct {
+  uint32_t opcodes;        // tamago_cpu_step calls
+  uint32_t reads_fast;     // hit page-table (WRAM/DRAM/ROM)
+  uint32_t reads_io;       // missed → tamago_io_read
+  uint32_t writes_fast;    // hit page-table
+  uint32_t writes_io;      // hit I/O area
+  uint32_t writes_dropped; // hit ROM (silently ignored)
+  uint32_t irqs;           // tamago_fire_irq calls
+  uint32_t nmis;           // tamago_fire_nmi calls
+  uint32_t irq_entries;    // actual CPU IRQ entries (after mask check)
+  uint32_t nmi_entries;    // actual CPU NMI entries
+} tamago_profile_t;
+
+extern tamago_profile_t g_tamago_profile;
+
 #define TAMAGO_INLINE static inline __attribute__((always_inline))
 
 TAMAGO_INLINE uint8_t tamago_read(uint16_t addr)
@@ -111,24 +130,5 @@ void    tamago_cpu_irq(void);
 // IRQ logic (defined in tamago_memory.c since it touches cpureg)
 void tamago_fire_irq(uint8_t i);
 void tamago_fire_nmi(uint8_t i);
-
-// ----- Profiling counters --------------------------------------------------
-//
-// Bumped from the hot path. Cost per increment is one load + add + store
-// (small but nonzero). Toggle TAMAGO_PROFILE = 0 in tamago.c to disable.
-typedef struct {
-  uint32_t opcodes;        // tamago_cpu_step calls
-  uint32_t reads_fast;     // hit page-table (WRAM/DRAM/ROM)
-  uint32_t reads_io;       // missed → tamago_io_read
-  uint32_t writes_fast;    // hit page-table
-  uint32_t writes_io;      // hit I/O area
-  uint32_t writes_dropped; // hit ROM (silently ignored)
-  uint32_t irqs;           // tamago_fire_irq calls
-  uint32_t nmis;           // tamago_fire_nmi calls
-  uint32_t irq_entries;    // actual CPU IRQ entries (after mask check)
-  uint32_t nmi_entries;    // actual CPU NMI entries
-} tamago_profile_t;
-
-extern tamago_profile_t g_tamago_profile;
 
 #endif // TAMAGO_INTERNAL_H
