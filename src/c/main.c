@@ -91,6 +91,13 @@ static uint8_t      s_icons[TAMAGO_ICON_COUNT];
 static uint32_t     s_total_steps;
 static bool         s_running;
 
+// Runtime settings — defined fully + loaded in load_settings() later.
+// Forward-declared here so the update_proc functions earlier in the file
+// can reference them.
+static bool   s_tama_frame_enabled = true;
+static GColor s_tama_frame_color;
+static GColor s_tama_pixel_color;
+
 // 4-level grayscale palette (matches JS PALETTE).
 static GColor s_palette[4];
 
@@ -662,11 +669,9 @@ static void window_unload(Window *window)
 #define PERSIST_KEY_TAMA_FRAME_COLOR    3
 #define PERSIST_KEY_TAMA_PIXEL_COLOR    4
 
-// Runtime setting state. Defaults match the previously hardcoded look.
+// Runtime setting state — declarations are at the top of the file
+// (forward-declared so the early update_proc functions can use them).
 // s_vibration_enabled lives in the attention block above.
-static bool   s_tama_frame_enabled = true;
-static GColor s_tama_frame_color;   // initialised in load_settings
-static GColor s_tama_pixel_color;   // initialised in load_settings
 
 // Re-derive the 4-shade greyscale palette from a single user-chosen
 // "darkest pixel" color. We blend toward white in 4 equal steps:
@@ -683,8 +688,12 @@ static void update_palette_from_color(GColor user_color)
     int r = (3 * (3 - i) + r_user * i + 1) / 3;
     int g = (3 * (3 - i) + g_user * i + 1) / 3;
     int b = (3 * (3 - i) + b_user * i + 1) / 3;
-    if (r > 3) r = 3; if (g > 3) g = 3; if (b > 3) b = 3;
-    if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
+    if (r > 3) r = 3;
+    if (g > 3) g = 3;
+    if (b > 3) b = 3;
+    if (r < 0) r = 0;
+    if (g < 0) g = 0;
+    if (b < 0) b = 0;
     s_palette[i].a = 3;
     s_palette[i].r = (uint8_t)r;
     s_palette[i].g = (uint8_t)g;
