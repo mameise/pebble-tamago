@@ -820,7 +820,7 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
   if (t) {
     // Clay "select" sends the option's value as a C-string (e.g. "0", "1", "2").
     uint8_t style = 0;
-    if (t->type == TUPLE_CSTRING && t->value->cstring) {
+    if (t->type == TUPLE_CSTRING && t->length > 0) {
       style = (uint8_t)atoi(t->value->cstring);
     } else if (t->type == TUPLE_INT) {
       style = (uint8_t)t->value->int32;
