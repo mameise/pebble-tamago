@@ -213,6 +213,13 @@ uint8_t tamago_io_read(uint16_t addr)
 }
 
 // Slow-path I/O write — called only when tamago_write_page[page] is NULL.
+
+// Per-register write counters for investigating unmapped I/O. Cleared by
+// tamago_io_dump_counters(). Used to identify the SPU (sound) registers
+// by watching which addresses get touched when the Tama beeps.
+static uint32_t s_io_write_counters[256];
+static uint8_t  s_io_last_value[256];
+
 void tamago_io_write(uint16_t addr, uint8_t value)
 {
   uint8_t reg = addr & 0xFF;
@@ -226,8 +233,31 @@ void tamago_io_write(uint16_t addr, uint8_t value)
     case 0x74: io_write_int_flag(reg, value); break;
     default:
       g_cpureg[reg] = value;
+      s_io_write_counters[reg]++;
+      s_io_last_value[reg] = value;
       break;
   }
+}
+
+// Dump all non-zero write counters to APP_LOG, then reset. Call this
+// periodically while debugging to see which I/O registers the firmware
+// is touching. Counters are reset after dumping so successive dumps
+// reflect only the most recent activity window.
+void tamago_io_dump_counters(void)
+{
+  bool any = false;
+  for (int r = 0; r < 256; r++) {
+    if (s_io_write_counters[r] > 0) {
+      APP_LOG(APP_LOG_LEVEL_INFO,
+              "io: $30%02x writes=%lu last=$%02x",
+              r, (unsigned long)s_io_write_counters[r], s_io_last_value[r]);
+      any = true;
+    }
+  }
+  if (!any) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "io: no unmapped writes this window");
+  }
+  for (int r = 0; r < 256; r++) s_io_write_counters[r] = 0;
 }
 
 // ----- IRQ / NMI dispatch helpers ----------------------------------------
