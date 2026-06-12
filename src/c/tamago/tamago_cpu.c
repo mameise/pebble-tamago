@@ -22,6 +22,12 @@
 
 #include "tamago_internal.h"
 
+// Pebble's default -Os is wrong for this file — every static-inline op_*
+// and addressing-mode helper benefits from -O2 unrolling/inlining. We
+// don't apply it via per-function attribute because the inline helpers
+// are called from multiple places; a file-level pragma covers them all.
+#pragma GCC optimize ("O2")
+
 // Convenience pointers to cut down on g_sys-> noise in this file.
 #define CPU g_cpu
 
