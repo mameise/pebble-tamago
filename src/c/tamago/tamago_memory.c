@@ -21,6 +21,7 @@
  */
 
 #include "tamago_internal.h"
+#include "tamago_eeprom.h"
 
 // We need the resource ID generated from package.json's "media" entry.
 // Defined in the generated header `src/resource_ids.auto.h` which is
@@ -168,17 +169,34 @@ static uint8_t io_read_porta(uint8_t reg)
   return (mask & value) | (~mask & input);
 }
 
+// $3015 (direction) and $3016 (data) writes both end up here. After
+// updating the register, we feed the new bus state to the EEPROM bit
+// banging engine. Matches write_portb_dir_data in registers.js exactly:
+//
+//   d = ~mask | data    (input bits read as 1 because of pull-ups)
+//   eeprom.update(d & 4, d & 2, d & 1)
+//
+// Bit 2 = POWER, bit 1 = CLK, bit 0 = DATA.
 static void io_write_portb(uint8_t reg, uint8_t value)
 {
   g_cpureg[reg] = value;
-  // EEPROM hookup later.
+  uint8_t mask = g_cpureg[0x15];
+  uint8_t d    = (uint8_t)(~mask) | g_cpureg[0x16];
+  tamago_eeprom_update(d & 4, d & 2, d & 1);
 }
 
+// Port B read: bits configured as outputs return what we drove; bits
+// configured as inputs read from the EEPROM data line.
+//
+// (As in the JS reference, the EEPROM output bit is broadcast over all
+// input bits via the ~mask term. Only bit 0 is actually meaningful for
+// the EEPROM but the firmware only reads bit 0 anyway.)
 static uint8_t io_read_portb(uint8_t reg)
 {
-  uint8_t mask = g_cpureg[0x15];
-  uint8_t eeprom_out = 1;
-  return (mask & g_cpureg[reg]) | (~mask & eeprom_out);
+  uint8_t mask        = g_cpureg[0x15];
+  uint8_t eeprom_out  = tamago_eeprom_output();
+  uint8_t input_bits  = eeprom_out ? (uint8_t)~mask : 0;
+  return (uint8_t)((mask & g_cpureg[reg]) | input_bits);
 }
 
 // Slow-path I/O read — called only when tamago_read_page[page] is NULL.

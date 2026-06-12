@@ -5,6 +5,7 @@
  */
 
 #include "tamago_internal.h"
+#include "tamago_eeprom.h"
 
 // ----- Global state definitions ------------------------------------------
 //
@@ -62,6 +63,7 @@ bool tamago_init(void)
 
   if (!tamago_load_static_rom()) return false;
   tamago_set_rom_bank(0);
+  tamago_eeprom_init();      // load save data from persist
   tamago_cpu_reset();
 
   g_initialised = true;
@@ -72,6 +74,10 @@ bool tamago_init(void)
 
 void tamago_release(void)
 {
+  // Flush any pending EEPROM writes back to persist before we tear down.
+  // Without this, save data written between the last STOP-after-WRITE
+  // and app exit would be lost.
+  tamago_eeprom_flush();
   if (g_rom_bank_buf) { free(g_rom_bank_buf); g_rom_bank_buf = NULL; }
   if (g_static_rom)   { free(g_static_rom);   g_static_rom   = NULL; }
   g_initialised = false;
