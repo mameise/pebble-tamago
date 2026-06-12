@@ -21,33 +21,65 @@
 #define EMU_FRAME_MS    (1000 / EMU_FPS)
 #define EMU_CYCLES_PER_FRAME (TAMAGO_CLOCK_RATE / EMU_FPS)
 
-// Display scaling. Hardware is 48×31; on Emery's 200×228 we can comfortably
-// go 3x for a sharp tama at 144×93 pixels (or even 4x = 192×124 for a really
-// chunky look). Stick with 3x for now to leave headroom for the watchface
-// chrome.
-#define TAMA_SCALE      3
-#define TAMA_DRAW_W     (TAMAGO_LCD_WIDTH  * TAMA_SCALE)
-#define TAMA_DRAW_H     (TAMAGO_LCD_HEIGHT * TAMA_SCALE)
+// ----- Layout constants (Emery: 200×228) ----
+//
+// Watchface-style layout. Top half is the clock face (time + date +
+// battery), bottom half is a white "device" panel containing the Tama
+// LCD and its status icons. Mirrors the look of the P1 Tamagotchi
+// watchface but scaled for Tama-Go's larger native LCD (48×31 vs the
+// P1's 32×16).
+//
+//   y=  6..42   time text       (GOTHIC_28_BOLD, centered)
+//   y= 46..66   battery (left) + date (right)
+//   y= 76..220  tama panel      (white background)
+//     y= 80..94    top icon row
+//     y=100..162   tama LCD (96×62, 2× scaled)
+//     y=168..182   bottom icon row
+//   y=222..228  bottom safe-zone
 
-// Status icon layout: 5 icons in each row (top + bottom), each 12×12 px
-// rendered at 1× scale plus 4 px horizontal gap between icons.
+// Display scaling. 2× gives a 96×62 LCD that fits cleanly into the
+// watchface panel without crowding the clock area above.
+#define TAMA_SCALE      2
+#define TAMA_DRAW_W     (TAMAGO_LCD_WIDTH  * TAMA_SCALE)   // 96
+#define TAMA_DRAW_H     (TAMAGO_LCD_HEIGHT * TAMA_SCALE)   // 62
+
+// Status icons: 12×12 each with a 4 px gap.
 #define ICON_W           12
 #define ICON_H           12
 #define ICON_GAP          4
-#define ICON_ROW_W       (5 * ICON_W + 4 * ICON_GAP)   // = 76 px
+#define ICON_ROW_W       (5 * ICON_W + 4 * ICON_GAP)        // 76
+
+// Panel (white device background behind tama LCD + icons).
+#define PANEL_X          20
+#define PANEL_Y          76
+#define PANEL_W         160
+#define PANEL_H         146
+#define PANEL_RADIUS      6     // rounded-corner look
+
+// Row positions within the panel (absolute y).
+#define ICONS_TOP_Y      80
+#define ICONS_TOP_H      14
+#define TAMA_LCD_Y      100
+#define ICONS_BOT_Y     168
+#define ICONS_BOT_H      14
 
 // ----- State ----
 
-static Window     *s_window;
-static Layer      *s_tama_layer;
-static Layer      *s_icons_top_layer;
-static Layer      *s_icons_bot_layer;
-static TextLayer  *s_status_layer;
-static AppTimer   *s_step_timer;
-static char        s_status_text[64];
-static uint8_t     s_framebuffer[TAMAGO_LCD_WIDTH * TAMAGO_LCD_HEIGHT];
-static uint8_t     s_icons[TAMAGO_ICON_COUNT];
-static uint32_t    s_total_steps;
+static Window      *s_window;
+static Layer       *s_tama_bg_layer;     // white panel background
+static Layer       *s_tama_layer;        // tama LCD pixels
+static Layer       *s_icons_top_layer;
+static Layer       *s_icons_bot_layer;
+static TextLayer   *s_time_layer;
+static TextLayer   *s_date_layer;
+static TextLayer   *s_battery_layer;
+static AppTimer    *s_step_timer;
+static char         s_time_text[16];
+static char         s_date_text[16];
+static char         s_battery_text[8];
+static uint8_t      s_framebuffer[TAMAGO_LCD_WIDTH * TAMAGO_LCD_HEIGHT];
+static uint8_t      s_icons[TAMAGO_ICON_COUNT];
+static uint32_t     s_total_steps;
 static bool        s_running;
 
 // 4-level grayscale palette as Pebble GColor values. Indexed 0..3,
@@ -282,15 +314,8 @@ static void step_tick(void *data)
   bucket_step_ms += step_ms;
   bucket_wall_ms += wall_ms;
 
-  // Update status line every 5 seconds (rather than every second). The
-  // text layer redraw is relatively expensive and isn't time-critical.
-  static uint32_t status_ctr = 0;
-  if (++status_ctr >= EMU_FPS * 5) {
-    status_ctr = 0;
-    snprintf(s_status_text, sizeof(s_status_text),
-             "Tama-Go: %lu kc", (unsigned long)(s_total_steps / 1000));
-    text_layer_set_text(s_status_layer, s_status_text);
-  }
+  // (Old "Tama-Go: XXX kc" debug status text replaced by the real
+  // time/date display. Cycle counts still go to APP_LOG below.)
 
   // Debug log every ~3 seconds: dump CPU state + perf info.
   static uint32_t dbg_ctr = 0;
@@ -384,46 +409,109 @@ static void click_config_provider(void *context)
   window_raw_click_subscribe(BUTTON_ID_DOWN,   btn_c_press, btn_c_release, NULL);
 }
 
+// ----- Time / date / battery updates ----
+
+static void update_time_and_date(struct tm *t)
+{
+  // Time: HH:MM, following the system 12h/24h preference.
+  if (clock_is_24h_style()) {
+    strftime(s_time_text, sizeof(s_time_text), "%H:%M", t);
+  } else {
+    strftime(s_time_text, sizeof(s_time_text), "%I:%M", t);
+  }
+  // Strip leading zero in 12h mode.
+  if (s_time_text[0] == '0') {
+    memmove(s_time_text, s_time_text + 1, strlen(s_time_text));
+  }
+  text_layer_set_text(s_time_layer, s_time_text);
+
+  // Date: e.g. "Fri 12 Jun".
+  strftime(s_date_text, sizeof(s_date_text), "%a %d %b", t);
+  text_layer_set_text(s_date_layer, s_date_text);
+}
+
+static void tick_handler(struct tm *tick_time, TimeUnits units_changed)
+{
+  update_time_and_date(tick_time);
+}
+
+static void battery_handler(BatteryChargeState state)
+{
+  snprintf(s_battery_text, sizeof(s_battery_text), "%d%%", (int)state.charge_percent);
+  text_layer_set_text(s_battery_layer, s_battery_text);
+}
+
+// ----- Tama-panel background ----
+//
+// Draws a white rounded-rect "device" background behind the Tama LCD
+// and its menu icons. Mirrors the look of the P1 watchface's tama_bg.
+static void tama_bg_update_proc(Layer *layer, GContext *ctx)
+{
+  GRect bounds = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  graphics_fill_rect(ctx, bounds, PANEL_RADIUS, GCornersAll);
+  // A thin border so the panel doesn't blend into a white watchface.
+  graphics_context_set_stroke_color(ctx, GColorBlack);
+  graphics_draw_round_rect(ctx, bounds, PANEL_RADIUS);
+}
+
 // ----- Window lifecycle ----
 
 static void window_load(Window *window)
 {
   Layer *root = window_get_root_layer(window);
-  GRect bounds = layer_get_bounds(root);
+  window_set_background_color(window, GColorLightGray);
 
-  // Vertical layout on Emery (200×228):
-  //   0..18   status text (single line)
-  //   20..36  top icon row (5 icons, 12 px tall + 4 px margin)
-  //   40..133 tama display (3× scaled = 144×93, centered horizontally)
-  //   136..152 bottom icon row
-  //
-  // The tama layer is full-width and centers the scaled framebuffer
-  // inside itself; the icon layers are also full-width and the
-  // renderer centers the 5-icon row inside.
+  // 1. Time text (large, top).
+  s_time_layer = text_layer_create(GRect(0, 4, 200, 40));
+  text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
+  text_layer_set_font(s_time_layer, fonts_get_system_font(FONT_KEY_BITHAM_30_BLACK));
+  text_layer_set_background_color(s_time_layer, GColorClear);
+  text_layer_set_text_color(s_time_layer, GColorBlack);
+  text_layer_set_text(s_time_layer, "--:--");
+  layer_add_child(root, text_layer_get_layer(s_time_layer));
 
-  s_status_layer = text_layer_create(GRect(0, 0, bounds.size.w, 20));
-  text_layer_set_text_alignment(s_status_layer, GTextAlignmentCenter);
-  text_layer_set_font(s_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
-  text_layer_set_background_color(s_status_layer, GColorClear);
-  text_layer_set_text_color(s_status_layer, GColorBlack);
-  text_layer_set_text(s_status_layer, "Tama-Go starting...");
-  layer_add_child(root, text_layer_get_layer(s_status_layer));
+  // 2. Battery (left) and date (right) below the time.
+  s_battery_layer = text_layer_create(GRect(6, 46, 70, 22));
+  text_layer_set_text_alignment(s_battery_layer, GTextAlignmentLeft);
+  text_layer_set_font(s_battery_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_background_color(s_battery_layer, GColorClear);
+  text_layer_set_text_color(s_battery_layer, GColorBlack);
+  text_layer_set_text(s_battery_layer, "--%");
+  layer_add_child(root, text_layer_get_layer(s_battery_layer));
 
-  s_icons_top_layer = layer_create(GRect(0, 20, bounds.size.w, 18));
+  s_date_layer = text_layer_create(GRect(76, 46, 118, 22));
+  text_layer_set_text_alignment(s_date_layer, GTextAlignmentRight);
+  text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_background_color(s_date_layer, GColorClear);
+  text_layer_set_text_color(s_date_layer, GColorBlack);
+  text_layer_set_text(s_date_layer, "");
+  layer_add_child(root, text_layer_get_layer(s_date_layer));
+
+  // 3. Tama panel background (white rounded rect).
+  s_tama_bg_layer = layer_create(GRect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H));
+  layer_set_update_proc(s_tama_bg_layer, tama_bg_update_proc);
+  layer_add_child(root, s_tama_bg_layer);
+
+  // 4. Top icons row (inside the panel).
+  s_icons_top_layer = layer_create(GRect(0, ICONS_TOP_Y, 200, ICONS_TOP_H));
   layer_set_update_proc(s_icons_top_layer, icons_top_update);
   layer_add_child(root, s_icons_top_layer);
 
-  // Tama display layer below the top icons. Height covers the rest
-  // minus the bottom-icon row.
-  s_tama_layer = layer_create(GRect(0, 40, bounds.size.w,
-                                    bounds.size.h - 40 - 20));
+  // 5. Tama LCD (2× scaled = 96×62, centered horizontally).
+  s_tama_layer = layer_create(GRect(0, TAMA_LCD_Y, 200, TAMA_DRAW_H));
   layer_set_update_proc(s_tama_layer, tama_layer_update);
   layer_add_child(root, s_tama_layer);
 
-  s_icons_bot_layer = layer_create(GRect(0, bounds.size.h - 20,
-                                         bounds.size.w, 18));
+  // 6. Bottom icons row.
+  s_icons_bot_layer = layer_create(GRect(0, ICONS_BOT_Y, 200, ICONS_BOT_H));
   layer_set_update_proc(s_icons_bot_layer, icons_bot_update);
   layer_add_child(root, s_icons_bot_layer);
+
+  // Initial time/date/battery populate.
+  time_t now = time(NULL);
+  update_time_and_date(localtime(&now));
+  battery_handler(battery_state_service_peek());
 }
 
 static void window_unload(Window *window)
@@ -431,7 +519,10 @@ static void window_unload(Window *window)
   if (s_icons_bot_layer) { layer_destroy(s_icons_bot_layer); s_icons_bot_layer = NULL; }
   if (s_tama_layer)      { layer_destroy(s_tama_layer);      s_tama_layer = NULL; }
   if (s_icons_top_layer) { layer_destroy(s_icons_top_layer); s_icons_top_layer = NULL; }
-  if (s_status_layer)    { text_layer_destroy(s_status_layer); s_status_layer = NULL; }
+  if (s_tama_bg_layer)   { layer_destroy(s_tama_bg_layer);   s_tama_bg_layer = NULL; }
+  if (s_battery_layer)   { text_layer_destroy(s_battery_layer); s_battery_layer = NULL; }
+  if (s_date_layer)      { text_layer_destroy(s_date_layer); s_date_layer = NULL; }
+  if (s_time_layer)      { text_layer_destroy(s_time_layer); s_time_layer = NULL; }
 }
 
 // ----- App init ----
@@ -459,20 +550,22 @@ static void app_init(void)
 
   if (!tamago_init()) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "tamago_init failed -- aborting");
-    // Show an error window? For now we just exit.
     return;
   }
 
   s_window = window_create();
-#if defined(PBL_COLOR)
-  window_set_background_color(s_window, GColorWhite);
-#endif
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load = window_load,
     .unload = window_unload,
   });
   window_set_click_config_provider(s_window, click_config_provider);
   window_stack_push(s_window, true);
+
+  // System time + battery updates. MINUTE_UNIT keeps the watchface live
+  // without burning power on per-second redraws — the time text only
+  // changes once a minute anyway.
+  tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+  battery_state_service_subscribe(battery_handler);
 
   s_running = true;
   s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
@@ -482,6 +575,8 @@ static void app_deinit(void)
 {
   s_running = false;
   if (s_step_timer) { app_timer_cancel(s_step_timer); s_step_timer = NULL; }
+  battery_state_service_unsubscribe();
+  tick_timer_service_unsubscribe();
   if (s_window)     { window_destroy(s_window);       s_window     = NULL; }
   tamago_release();
 }
