@@ -94,23 +94,22 @@ static bool         s_running;
 // Runtime settings — defined fully + loaded in load_settings() later.
 // Forward-declared here so the update_proc functions earlier in the file
 // can reference them.
-static bool   s_tama_frame_enabled = true;
-static GColor s_tama_frame_color;
-static GColor s_tama_pixel_color;
+static bool    s_tama_frame_enabled = true;
+static GColor  s_tama_frame_color;
+static GColor  s_tama_pixel_color;
+static GColor  s_bg_fill_color;
+static GColor  s_bg_markers_color;
+static uint8_t s_bg_markers_style;     // 0=Arabic, 1=Roman, 2=Ticks
 
 // 4-level grayscale palette (matches JS PALETTE).
 static GColor s_palette[4];
 
-// ----- Hard-coded style defaults (Clay settings replace these later) ----
+// ----- Hard-coded style defaults (Clay settings replace these progressively) ----
 
-// Background fill color and marker color for the watch-face area.
-#define BG_FILL_COLOR         GColorLightGray
-#define BG_MARKERS_COLOR      GColorBlack
+// Background fill / hour-marker color + style are now Clay settings:
+// s_bg_fill_color, s_bg_markers_color, s_bg_markers_style.
 
-// Marker style: 0 = Arabic ("12"), 1 = Roman ("XII"), 2 = ticks.
-#define BG_MARKERS_STYLE      0
-
-// Analog hand colors + thickness.
+// Analog hand colors + thickness. (Step C will move these to settings.)
 #define HANDS_COLOR           GColorBlack
 #define HANDS_OUTLINE_COLOR   GColorWhite
 #define HANDS_INNER_HOUR      4
@@ -189,13 +188,11 @@ static const marker_pos_t MARKER_POSITIONS[12] = {
   /* 11 (11) */ {  42,  10 },
 };
 
-// Both arrays are present even though only one is referenced at build
-// time — once the Clay settings page lands, marker style switches at
-// runtime and both are needed. Mark unused so -Werror is happy for now.
-static const char *const ARABIC_NUMERALS[12] __attribute__((unused)) = {
+// Both arrays are now used at runtime based on s_bg_markers_style.
+static const char *const ARABIC_NUMERALS[12] = {
   "12", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
 };
-static const char *const ROMAN_NUMERALS[12] __attribute__((unused)) = {
+static const char *const ROMAN_NUMERALS[12] = {
   "XII", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI",
 };
 
@@ -206,7 +203,7 @@ static const char *const ROMAN_NUMERALS[12] __attribute__((unused)) = {
 static void bg_update_proc(Layer *layer, GContext *ctx)
 {
   GRect bounds = layer_get_bounds(layer);
-  graphics_context_set_fill_color(ctx, BG_FILL_COLOR);
+  graphics_context_set_fill_color(ctx, s_bg_fill_color);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
   GFont marker_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
@@ -215,38 +212,34 @@ static void bg_update_proc(Layer *layer, GContext *ctx)
     int16_t mx = MARKER_POSITIONS[i].x;
     int16_t my = MARKER_POSITIONS[i].y;
 
-#if BG_MARKERS_STYLE == 2
-    int width = (i % 3 == 0) ? 4 : 2;
-    graphics_context_set_stroke_color(ctx, BG_MARKERS_COLOR);
-    graphics_context_set_stroke_width(ctx, width);
-    GPoint p1, p2;
-    if (i == 0 || i == 6) {
-      p1 = GPoint(mx, my - BG_TICK_LENGTH / 2);
-      p2 = GPoint(mx, my + BG_TICK_LENGTH / 2);
-    } else if (i == 3 || i == 9) {
-      p1 = GPoint(mx - BG_TICK_LENGTH / 2, my);
-      p2 = GPoint(mx + BG_TICK_LENGTH / 2, my);
-    } else if (i == 1 || i == 5 || i == 7 || i == 11) {
-      p1 = GPoint(mx, my - BG_TICK_LENGTH / 2);
-      p2 = GPoint(mx, my + BG_TICK_LENGTH / 2);
+    if (s_bg_markers_style == 2) {
+      // Ticks: short line at each marker position, longer for cardinals.
+      int width = (i % 3 == 0) ? 4 : 2;
+      graphics_context_set_stroke_color(ctx, s_bg_markers_color);
+      graphics_context_set_stroke_width(ctx, width);
+      // Determine tick orientation based on which edge the marker sits on.
+      // Top/bottom markers: vertical tick. Left/right markers: horizontal.
+      bool vertical = (i == 0 || i == 6 || i == 1 || i == 5 || i == 7 || i == 11);
+      GPoint p1, p2;
+      if (vertical) {
+        p1 = GPoint(mx, my - BG_TICK_LENGTH / 2);
+        p2 = GPoint(mx, my + BG_TICK_LENGTH / 2);
+      } else {
+        p1 = GPoint(mx - BG_TICK_LENGTH / 2, my);
+        p2 = GPoint(mx + BG_TICK_LENGTH / 2, my);
+      }
+      graphics_draw_line(ctx, p1, p2);
     } else {
-      p1 = GPoint(mx - BG_TICK_LENGTH / 2, my);
-      p2 = GPoint(mx + BG_TICK_LENGTH / 2, my);
+      // Arabic (0) or Roman (1) numerals drawn as text.
+      const char *label = (s_bg_markers_style == 1)
+                        ? ROMAN_NUMERALS[i]
+                        : ARABIC_NUMERALS[i];
+      GRect text_rect = GRect(mx - 16, my - 11, 32, 22);
+      graphics_context_set_text_color(ctx, s_bg_markers_color);
+      graphics_draw_text(ctx, label, marker_font, text_rect,
+                         GTextOverflowModeWordWrap,
+                         GTextAlignmentCenter, NULL);
     }
-    graphics_draw_line(ctx, p1, p2);
-#else
-    const char *label =
-#if BG_MARKERS_STYLE == 1
-      ROMAN_NUMERALS[i];
-#else
-      ARABIC_NUMERALS[i];
-#endif
-    GRect text_rect = GRect(mx - 16, my - 11, 32, 22);
-    graphics_context_set_text_color(ctx, BG_MARKERS_COLOR);
-    graphics_draw_text(ctx, label, marker_font, text_rect,
-                       GTextOverflowModeWordWrap,
-                       GTextAlignmentCenter, NULL);
-#endif
   }
 }
 
@@ -668,6 +661,9 @@ static void window_unload(Window *window)
 #define PERSIST_KEY_TAMA_FRAME_ENABLED  2
 #define PERSIST_KEY_TAMA_FRAME_COLOR    3
 #define PERSIST_KEY_TAMA_PIXEL_COLOR    4
+#define PERSIST_KEY_BG_FILL_COLOR       5
+#define PERSIST_KEY_BG_MARKERS_COLOR    6
+#define PERSIST_KEY_BG_MARKERS_STYLE    7
 
 // Runtime setting state — declarations are at the top of the file
 // (forward-declared so the early update_proc functions can use them).
@@ -729,6 +725,25 @@ static void load_settings(void)
     s_tama_pixel_color = GColorBlack;
   }
 
+  if (persist_exists(PERSIST_KEY_BG_FILL_COLOR)) {
+    int v = persist_read_int(PERSIST_KEY_BG_FILL_COLOR);
+    s_bg_fill_color = (GColor){ .argb = (uint8_t)v };
+  } else {
+    s_bg_fill_color = GColorLightGray;
+  }
+
+  if (persist_exists(PERSIST_KEY_BG_MARKERS_COLOR)) {
+    int v = persist_read_int(PERSIST_KEY_BG_MARKERS_COLOR);
+    s_bg_markers_color = (GColor){ .argb = (uint8_t)v };
+  } else {
+    s_bg_markers_color = GColorBlack;
+  }
+
+  s_bg_markers_style = persist_exists(PERSIST_KEY_BG_MARKERS_STYLE)
+                     ? (uint8_t)persist_read_int(PERSIST_KEY_BG_MARKERS_STYLE)
+                     : 0;
+  if (s_bg_markers_style > 2) s_bg_markers_style = 0;
+
   update_palette_from_color(s_tama_pixel_color);
 }
 
@@ -738,6 +753,9 @@ static void save_settings(void)
   persist_write_bool(PERSIST_KEY_TAMA_FRAME_ENABLED, s_tama_frame_enabled);
   persist_write_int (PERSIST_KEY_TAMA_FRAME_COLOR,   s_tama_frame_color.argb);
   persist_write_int (PERSIST_KEY_TAMA_PIXEL_COLOR,   s_tama_pixel_color.argb);
+  persist_write_int (PERSIST_KEY_BG_FILL_COLOR,      s_bg_fill_color.argb);
+  persist_write_int (PERSIST_KEY_BG_MARKERS_COLOR,   s_bg_markers_color.argb);
+  persist_write_int (PERSIST_KEY_BG_MARKERS_STYLE,   s_bg_markers_style);
 }
 
 // ----- AppMessage (Clay settings round-trip) ------------------------------
@@ -782,6 +800,37 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
             (unsigned long)hex);
   }
 
+  t = dict_find(iter, MESSAGE_KEY_BgFillColor);
+  if (t) {
+    uint32_t hex = (uint32_t)t->value->int32;
+    s_bg_fill_color = GColorFromHEX(hex);
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: BgFillColor = 0x%06lx",
+            (unsigned long)hex);
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_BgMarkersColor);
+  if (t) {
+    uint32_t hex = (uint32_t)t->value->int32;
+    s_bg_markers_color = GColorFromHEX(hex);
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: BgMarkersColor = 0x%06lx",
+            (unsigned long)hex);
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_BgMarkersStyle);
+  if (t) {
+    // Clay "select" sends the option's value as a C-string (e.g. "0", "1", "2").
+    uint8_t style = 0;
+    if (t->type == TUPLE_CSTRING && t->value->cstring) {
+      style = (uint8_t)atoi(t->value->cstring);
+    } else if (t->type == TUPLE_INT) {
+      style = (uint8_t)t->value->int32;
+    }
+    if (style > 2) style = 0;
+    s_bg_markers_style = style;
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: BgMarkersStyle = %d",
+            (int)s_bg_markers_style);
+  }
+
   if (changed_palette) {
     update_palette_from_color(s_tama_pixel_color);
   }
@@ -789,6 +838,7 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
   save_settings();
 
   // Trigger a redraw so the new look takes effect immediately.
+  if (s_bg_layer)        layer_mark_dirty(s_bg_layer);
   if (s_tama_bg_layer)   layer_mark_dirty(s_tama_bg_layer);
   if (s_tama_layer)      layer_mark_dirty(s_tama_layer);
   if (s_icons_top_layer) layer_mark_dirty(s_icons_top_layer);
