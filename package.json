@@ -27,7 +27,13 @@
       "TamaPixelColor",
       "BgFillColor",
       "BgMarkersColor",
-      "BgMarkersStyle"
+      "BgMarkersStyle",
+      "HandsColor",
+      "HandsOutlineColor",
+      "HandsThickness",
+      "TextColor",
+      "TextOutline",
+      "TextOutlineColor"
     ],
     "resources": {
       "media": [
