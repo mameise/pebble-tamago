@@ -101,6 +101,81 @@ module.exports = [
   },
 
   {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Hands"
+      },
+      {
+        "type": "color",
+        "messageKey": "HandsColor",
+        "label": "Hands color",
+        "description": "Inner color of the analog hour and minute hands.",
+        "defaultValue": "000000",
+        "sunlight": true,
+        "allowGray": true
+      },
+      {
+        "type": "color",
+        "messageKey": "HandsOutlineColor",
+        "label": "Hands outline color",
+        "description": "Outline drawn around the hands so they stay visible over any background.",
+        "defaultValue": "FFFFFF",
+        "sunlight": true,
+        "allowGray": true
+      },
+      {
+        "type": "select",
+        "messageKey": "HandsThickness",
+        "label": "Hands thickness",
+        "description": "Stroke width of the analog hands.",
+        "defaultValue": "1",
+        "options": [
+          { "label": "Thick",  "value": "0" },
+          { "label": "Medium", "value": "1" },
+          { "label": "Thin",   "value": "2" }
+        ]
+      }
+    ]
+  },
+
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Text"
+      },
+      {
+        "type": "color",
+        "messageKey": "TextColor",
+        "label": "Text color",
+        "description": "Color of the digital time, date, and battery text.",
+        "defaultValue": "000000",
+        "sunlight": true,
+        "allowGray": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "TextOutline",
+        "label": "Text outline",
+        "description": "Draw a contrasting outline around the time text so it stays readable over any background.",
+        "defaultValue": false
+      },
+      {
+        "type": "color",
+        "messageKey": "TextOutlineColor",
+        "label": "Text outline color",
+        "description": "Color of the text outline (when enabled).",
+        "defaultValue": "FFFFFF",
+        "sunlight": true,
+        "allowGray": true
+      }
+    ]
+  },
+
+  {
     "type": "submit",
     "defaultValue": "Save Settings"
   }
