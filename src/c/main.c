@@ -29,23 +29,22 @@
 #define EMU_FRAME_MS          (1000 / EMU_FPS)
 #define EMU_CYCLES_PER_FRAME  (TAMAGO_CLOCK_RATE / EMU_FPS)
 
-// ----- Tama LCD layout (1.75× non-integer scale) ----
+// ----- Tama LCD layout (2× integer scale) ----
 //
 // Source: 48×31 (TAMAGO_LCD_WIDTH × TAMAGO_LCD_HEIGHT)
-// Dest:   84×54  (48×7/4, 31×7/4 rounded)
+// Dest:   96×62
 //
-// 1.75× = 7/4, so every 4 source pixels expand to 7 destination pixels.
-// The integer mapping gives a pattern of block widths (1,2,2,2) repeating,
-// which reads as a slightly uneven but mostly uniform stretch — better
-// than 1.5× (pattern 2,1) for text rendered inside the Tama display.
-// For perfectly uniform pixels you'd need 2× (= 96×62).
+// 2× integer scaling keeps each source pixel a perfectly uniform 2×2
+// block in the destination — text and fine LCD segments stay crisp.
+// 1.5× / 1.75× looked uneven because their per-column block patterns
+// stretched some pixels by 2 and others by 1.
 
-#define TAMA_DRAW_W           84
-#define TAMA_DRAW_H           54
-#define TAMA_LCD_X            ((200 - TAMA_DRAW_W) / 2)        // 58
-#define TAMA_LCD_Y            140
-#define TAMA_LCD_X_RIGHT      (TAMA_LCD_X + TAMA_DRAW_W)        // 142
-#define TAMA_LCD_Y_BOTTOM     (TAMA_LCD_Y + TAMA_DRAW_H)        // 194
+#define TAMA_DRAW_W           96
+#define TAMA_DRAW_H           62
+#define TAMA_LCD_X            ((200 - TAMA_DRAW_W) / 2)        // 52
+#define TAMA_LCD_Y            128                              // moved up
+#define TAMA_LCD_X_RIGHT      (TAMA_LCD_X + TAMA_DRAW_W)        // 148
+#define TAMA_LCD_Y_BOTTOM     (TAMA_LCD_Y + TAMA_DRAW_H)        // 190
 
 // ----- Icon layout (5 per row, 12×12 each) ----
 
@@ -55,21 +54,19 @@
 #define ICON_ROW_W            (5 * ICON_W + 4 * ICON_GAP)       // 76
 #define ICON_ROW_X            ((200 - ICON_ROW_W) / 2)          // 62
 
-#define ICONS_TOP_Y           126
-#define ICONS_BOT_Y           198
+#define ICONS_TOP_Y           112
+#define ICONS_BOT_Y           194
 
 // ----- Tama device-frame (dynamic) ----
-
-// When no icons are lit: small rounded frame just around the LCD.
-#define FRAME_IDLE_LEFT       (TAMA_LCD_X - 3)
-#define FRAME_IDLE_RIGHT      (TAMA_LCD_X_RIGHT + 3)
+//
+// Width is always anchored to the LCD bounds — at 2× scale the LCD is
+// wider than the icon row (96 vs 76), so the icons always fit inside a
+// frame sized for the LCD plus a small margin. Only the vertical extent
+// of the frame changes based on which icon rows are lit.
+#define FRAME_LEFT            (TAMA_LCD_X - 3)
+#define FRAME_RIGHT           (TAMA_LCD_X_RIGHT + 3)
 #define FRAME_IDLE_TOP        (TAMA_LCD_Y - 3)
 #define FRAME_IDLE_BOTTOM     (TAMA_LCD_Y_BOTTOM + 3)
-
-// When icons are lit: extended frame covering icon rows.
-#define FRAME_EXT_LEFT        (ICON_ROW_X - 3)
-#define FRAME_EXT_RIGHT       (ICON_ROW_X + ICON_ROW_W + 3)
-
 #define FRAME_RADIUS          4
 
 // ----- State ----
@@ -248,30 +245,23 @@ static void bg_update_proc(Layer *layer, GContext *ctx)
 // ----- Tama device frame (dynamic white panel) ----
 
 // Layer covers the whole window so the rect we draw inside is in absolute
-// window coordinates. The rect's size depends on which icon rows have lit
-// icons — if none, just a small frame around the LCD; if any are lit,
-// extend to cover the icon row(s).
+// window coordinates. The rect's width is always FRAME_LEFT..FRAME_RIGHT
+// (LCD-anchored); only the vertical extent changes when icons are lit.
 static void tama_bg_update_proc(Layer *layer, GContext *ctx)
 {
   bool top_lit = false, bot_lit = false;
   for (int i = 0; i < 5; i++) if (s_icons[i])     top_lit = true;
   for (int i = 5; i < 10; i++) if (s_icons[i])    bot_lit = true;
 
-  // No icons → no panel at all. The Tama LCD will draw on the watchface
-  // background directly, like an LCD device sitting in front of the
-  // watchface paint.
+  // No icons → no panel at all. The Tama LCD floats on the watchface.
   if (!top_lit && !bot_lit) return;
 
-  int left   = (top_lit || bot_lit) ? FRAME_EXT_LEFT   : FRAME_IDLE_LEFT;
-  int right  = (top_lit || bot_lit) ? FRAME_EXT_RIGHT  : FRAME_IDLE_RIGHT;
   int top    = top_lit ? (ICONS_TOP_Y - 3) : FRAME_IDLE_TOP;
   int bottom = bot_lit ? (ICONS_BOT_Y + ICON_H + 3) : FRAME_IDLE_BOTTOM;
 
-  GRect r = GRect(left, top, right - left, bottom - top);
+  GRect r = GRect(FRAME_LEFT, top, FRAME_RIGHT - FRAME_LEFT, bottom - top);
   graphics_context_set_fill_color(ctx, TAMA_FRAME_FILL);
   graphics_fill_rect(ctx, r, FRAME_RADIUS, GCornersAll);
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_draw_round_rect(ctx, r, FRAME_RADIUS);
 }
 
 // ----- Tama LCD rendering (1.5× non-integer scale) ----
