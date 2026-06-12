@@ -37,22 +37,20 @@
 // to cpu.p when push/pull/reset/etc. needs it. This matches the JS
 // original which has separate cpu.c/cpu.z/... fields.
 
-// NZ flags are stored "lazy" as the last value that set them.
-//   N flag is set iff bit 7 of s_nz is set
-//   Z flag is set iff s_nz == 0
-// This makes set_nz a single-byte store (vs computing 2 booleans), which
-// is a measurable win because 30-40% of 6502 opcodes update N/Z.
+// NZ flags stored lazily as byte values.
+//   N flag: (s_nz_n & 0x80) != 0       — bit 7 of the last "N source"
+//   Z flag: s_nz_z == 0                 — last "Z source" was zero
 //
-// The 4 (N,Z) combinations encode into s_nz as:
-//   N=0, Z=0 → any nonzero positive byte (e.g. 0x01)
-//   N=0, Z=1 → 0x00
-//   N=1, Z=0 → any byte with bit 7 set, nonzero (e.g. 0x80)
-//   N=1, Z=1 → NOT REPRESENTABLE (since N=1 needs bit 7 set, but Z=1
-//              needs s_nz==0). Comes up only when BIT or PLP construct
-//              an inconsistent flag state. We fall back to "Z wins"
-//              (s_nz=0) — N is dropped in that edge case. Tama-Go
-//              firmware doesn't observably depend on this corner.
-static uint8_t s_nz;       // lazy NZ value
+// Two bytes (not one) because BIT and PLP can set N and Z from
+// independent sources (e.g. BIT: N from v[7], Z from (A & v) == 0).
+// Storing just one byte loses the N=1+Z=1 case that BIT routinely
+// produces, which breaks branches after BIT — exactly the path the
+// Tama firmware uses to test status bits.
+//
+// set_nz (the common case) updates both with the same value, which the
+// compiler may even fuse into a single 16-bit store.
+static uint8_t s_nz_n;     // value whose bit 7 is the N flag
+static uint8_t s_nz_z;     // value whose zero-ness is the Z flag
 static uint8_t s_flag_v;   // Overflow
 static uint8_t s_flag_d;  // Decimal
 static uint8_t s_flag_i;  // IRQ disable
@@ -63,37 +61,33 @@ static uint8_t s_flag_c;  // Carry
 static inline uint8_t pack_p(void)
 {
   return (s_flag_c ? 0x01 : 0) |
-         ((s_nz == 0) ? 0x02 : 0) |
+         ((s_nz_z == 0) ? 0x02 : 0) |
          (s_flag_i ? 0x04 : 0) |
          (s_flag_d ? 0x08 : 0) |
          0x20 |
          (s_flag_v ? 0x40 : 0) |
-         (s_nz & 0x80);
+         (s_nz_n & 0x80);
 }
 
-// Unpack a P-register byte into the flags. The two NZ bits encode into
-// s_nz; see the comment at s_nz's declaration for the encoding rules.
+// Unpack a P-register byte into the flags. N and Z are restored
+// independently into their respective lazy bytes.
 static inline void unpack_p(uint8_t p)
 {
   s_flag_c = p & 0x01;
   s_flag_i = p & 0x04;
   s_flag_d = p & 0x08;
   s_flag_v = p & 0x40;
-  if (p & 0x02) {
-    s_nz = 0;              // Z wins; if N=1 here, it is dropped.
-  } else if (p & 0x80) {
-    s_nz = 0x80;
-  } else {
-    s_nz = 0x01;
-  }
+  s_nz_n = (p & 0x80) ? 0x80 : 0;    // N flag → bit 7 of s_nz_n
+  s_nz_z = (p & 0x02) ? 0    : 1;    // Z flag → s_nz_z == 0
 }
 
-// Hot path — called by ~35% of opcodes (LDA/LDX/LDY/INC/DEC/AND/OR/EOR/
-// ASL/LSR/ROL/ROR/CMP/CPX/CPY/transfers/ADC/SBC). Reduced from 2 stores
-// + 2 computes to a single byte store.
+// Hot path — called by ~35% of opcodes. Two byte stores, no computes.
+// The compiler may fuse these into a single 16-bit halfword store if
+// s_nz_n and s_nz_z are adjacent in memory (they are).
 static inline void set_nz(uint8_t v)
 {
-  s_nz = v;
+  s_nz_n = v;
+  s_nz_z = v;
 }
 
 // ----- Stack operations ---------------------------------------------------
@@ -134,7 +128,8 @@ void tamago_cpu_reset(void)
   CPU.x = 0;
   CPU.y = 0;
   CPU.s = 0xFF;  // initial stack pointer; some 6502 conventions use 0xFF
-  s_nz = 0x01;     // N=0, Z=0 — same as original reset state
+  s_nz_n = 0;      // N=0
+  s_nz_z = 1;      // Z=0 (non-zero)
   s_flag_v = 0;
   s_flag_d = 0;
   s_flag_i = 1;  // IRQs masked at reset
@@ -282,16 +277,8 @@ static inline void op_EOR(uint16_t addr) { CPU.a ^= tamago_read(addr); set_nz(CP
 static inline void op_BIT(uint16_t addr) {
   uint8_t v = tamago_read(addr);
   s_flag_v = v & 0x40;
-  // BIT sets N from v[7] and Z from (A & v) == 0 — independent sources.
-  // Encode into s_nz; same N=1+Z=1 edge case as unpack_p.
-  uint8_t and_result = CPU.a & v;
-  if (and_result == 0) {
-    s_nz = 0;                  // Z=1; if v[7] also set, N is dropped
-  } else if (v & 0x80) {
-    s_nz = 0x80;               // N=1, Z=0
-  } else {
-    s_nz = 0x01;               // N=0, Z=0
-  }
+  s_nz_n   = v;          // N from v[7]
+  s_nz_z   = CPU.a & v;  // Z from (A & v) == 0
 }
 
 // Shifts: when `acc` is true, operate on accumulator (addr ignored).
@@ -674,14 +661,14 @@ uint8_t tamago_cpu_step(void)
     case 0x00: op_BRK(); break;
 
     // --- Branches ---
-    case 0x10: BRANCH(!(s_nz & 0x80)); break;  // BPL
-    case 0x30: BRANCH( (s_nz & 0x80)); break;  // BMI
+    case 0x10: BRANCH(!(s_nz_n & 0x80)); break;  // BPL
+    case 0x30: BRANCH( (s_nz_n & 0x80)); break;  // BMI
     case 0x50: BRANCH(!s_flag_v); break;  // BVC
     case 0x70: BRANCH( s_flag_v); break;  // BVS
     case 0x90: BRANCH(!s_flag_c); break;  // BCC
     case 0xB0: BRANCH( s_flag_c); break;  // BCS
-    case 0xD0: BRANCH(s_nz != 0); break;  // BNE
-    case 0xF0: BRANCH(s_nz == 0); break;  // BEQ
+    case 0xD0: BRANCH(s_nz_z != 0); break;  // BNE
+    case 0xF0: BRANCH(s_nz_z == 0); break;  // BEQ
 
     // --- NOP and illegal ---
     case 0xEA: /* NOP */ break;
