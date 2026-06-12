@@ -616,10 +616,13 @@ static void step_tick(void *data)
     s_dirty_state_init = true;
   }
 
-  // Adaptive frame pacing — give the OS at least 5 ms between frames.
+  // Adaptive frame pacing — give the OS a tiny slice between frames to
+  // handle compositing/BT/etc. Originally 5 ms, which at our step_ms ≈ 50
+  // turned every frame into 55 ms wall and cost us ~10% of target speed.
+  // 1 ms is plenty (Pebble's scheduler is fine with sub-tick gaps).
   uint32_t next_delay;
-  if (step_ms + 5 >= EMU_FRAME_MS) {
-    next_delay = 5;
+  if (step_ms + 1 >= EMU_FRAME_MS) {
+    next_delay = 1;
   } else {
     next_delay = EMU_FRAME_MS - step_ms;
   }
