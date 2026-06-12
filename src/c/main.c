@@ -93,6 +93,16 @@ static char         s_date_text[16];
 static char         s_battery_text[8];
 static uint8_t      s_framebuffer[TAMAGO_LCD_WIDTH * TAMAGO_LCD_HEIGHT];
 static uint8_t      s_icons[TAMAGO_ICON_COUNT];
+
+// Dirty-tracking shadows: previous frame's LCD pixels and icon states.
+// Compared after each emulator step; we only mark visual layers dirty
+// when their inputs actually changed. Saves a full re-composite of the
+// (heavy) layer stack on identical frames.
+static uint8_t      s_framebuffer_prev[TAMAGO_LCD_WIDTH * TAMAGO_LCD_HEIGHT];
+static uint8_t      s_icons_prev[TAMAGO_ICON_COUNT];
+static bool         s_last_top_lit;
+static bool         s_last_bot_lit;
+static bool         s_dirty_state_init = false;   // force first-paint
 static uint32_t     s_total_steps;
 static bool         s_running;
 
@@ -308,7 +318,8 @@ static void tama_bg_update_proc(Layer *layer, GContext *ctx)
 
 static void tama_layer_update(Layer *layer, GContext *ctx)
 {
-  tamago_get_display(s_framebuffer);
+  // s_framebuffer is populated by step_tick before mark_dirty. No need
+  // to re-pull it here — that would just memcpy DRAM redundantly.
 
   GBitmap *fb = graphics_capture_frame_buffer(ctx);
   if (!fb) return;
@@ -533,10 +544,51 @@ static void step_tick(void *data)
   if ((++render_skip & 1) == 0) {
     tamago_get_icons(s_icons);
     check_attention_and_vibrate();
-    if (s_tama_bg_layer)    layer_mark_dirty(s_tama_bg_layer);
-    if (s_tama_layer)       layer_mark_dirty(s_tama_layer);
-    if (s_icons_top_layer)  layer_mark_dirty(s_icons_top_layer);
-    if (s_icons_bot_layer)  layer_mark_dirty(s_icons_bot_layer);
+
+    // ---- Dirty tracking ----
+    // Pull the LCD pixels and compare to last frame. Only mark layers
+    // dirty when their inputs actually changed; on Pebble the whole
+    // window composites every time, so saving a mark_dirty saves the
+    // entire stack (bg + tama_bg + tama_lcd + icons + text+shadows +
+    // hands) from being redrawn.
+    tamago_get_display(s_framebuffer);
+
+    // Tama LCD layer — pixel diff
+    bool lcd_changed = !s_dirty_state_init ||
+        memcmp(s_framebuffer, s_framebuffer_prev, sizeof(s_framebuffer)) != 0;
+
+    // Icons layers — separate top/bot since they're independent
+    bool icons_top_changed = !s_dirty_state_init ||
+        memcmp(&s_icons[0], &s_icons_prev[0], 5) != 0;
+    bool icons_bot_changed = !s_dirty_state_init ||
+        memcmp(&s_icons[5], &s_icons_prev[5], 5) != 0;
+
+    // Tama-frame visibility derived from icon row activity
+    bool top_lit = (s_icons[0] | s_icons[1] | s_icons[2] |
+                    s_icons[3] | s_icons[4]) != 0;
+    bool bot_lit = (s_icons[5] | s_icons[6] | s_icons[7] |
+                    s_icons[8] | s_icons[9]) != 0;
+    bool frame_changed = !s_dirty_state_init ||
+        (top_lit != s_last_top_lit) || (bot_lit != s_last_bot_lit);
+
+    if (lcd_changed) {
+      memcpy(s_framebuffer_prev, s_framebuffer, sizeof(s_framebuffer));
+      if (s_tama_layer) layer_mark_dirty(s_tama_layer);
+    }
+    if (icons_top_changed) {
+      memcpy(&s_icons_prev[0], &s_icons[0], 5);
+      if (s_icons_top_layer) layer_mark_dirty(s_icons_top_layer);
+    }
+    if (icons_bot_changed) {
+      memcpy(&s_icons_prev[5], &s_icons[5], 5);
+      if (s_icons_bot_layer) layer_mark_dirty(s_icons_bot_layer);
+    }
+    if (frame_changed) {
+      s_last_top_lit = top_lit;
+      s_last_bot_lit = bot_lit;
+      if (s_tama_bg_layer) layer_mark_dirty(s_tama_bg_layer);
+    }
+    s_dirty_state_init = true;
   }
 
   // Adaptive frame pacing — give the OS at least 5 ms between frames.
