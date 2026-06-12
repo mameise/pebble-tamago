@@ -148,9 +148,10 @@ static void step_tick(void *data)
   bucket_step_ms += step_ms;
   bucket_wall_ms += wall_ms;
 
-  // Update status line (don't do this every frame — keep it cheap).
+  // Update status line every 5 seconds (rather than every second). The
+  // text layer redraw is relatively expensive and isn't time-critical.
   static uint32_t status_ctr = 0;
-  if (++status_ctr >= EMU_FPS) {  // ~once per second
+  if (++status_ctr >= EMU_FPS * 5) {
     status_ctr = 0;
     snprintf(s_status_text, sizeof(s_status_text),
              "Tama-Go: %lu kc", (unsigned long)(s_total_steps / 1000));
@@ -181,8 +182,15 @@ static void step_tick(void *data)
     bucket_wall_ms = 0;
   }
 
-  // Redraw the tama layer.
-  if (s_tama_layer) layer_mark_dirty(s_tama_layer);
+  // Redraw the tama layer — but only every 2nd frame (effective 10 fps
+  // for the display). The Tama's animations don't need 20 Hz to look
+  // smooth, and rendering takes ~10-15ms per frame which is a
+  // significant chunk of our budget. Halving it frees CPU time to keep
+  // the emulator at full speed.
+  static uint8_t render_skip = 0;
+  if (s_tama_layer && (++render_skip & 1) == 0) {
+    layer_mark_dirty(s_tama_layer);
+  }
 
   // Adaptive frame pacing: aim for one frame every EMU_FRAME_MS ms of
   // wall-clock time. If step_cycles already ate the whole budget (or
