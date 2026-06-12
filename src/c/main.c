@@ -22,6 +22,7 @@
 #include <pebble.h>
 #include "tamago/tamago.h"
 #include "tamago/tamago_eeprom.h"
+#include "tamago/tamago_rtc_sync.h"
 
 // ----- Emulator configuration ----
 
@@ -628,6 +629,18 @@ static void init_palette(void)
 #endif
 }
 
+// Periodic RTC sync — runs every 15 minutes via app_timer.
+#define RTC_SYNC_INTERVAL_MS  (15 * 60 * 1000)
+static AppTimer *s_rtc_sync_timer;
+
+static void rtc_sync_tick(void *data)
+{
+  s_rtc_sync_timer = NULL;
+  if (!s_running) return;
+  tamago_rtc_periodic_check();
+  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS, rtc_sync_tick, NULL);
+}
+
 static void app_init(void)
 {
   init_palette();
@@ -636,6 +649,14 @@ static void app_init(void)
     APP_LOG(APP_LOG_LEVEL_ERROR, "tamago_init failed -- aborting");
     return;
   }
+
+  // Sync the Tama's internal clock to the Pebble RTC right away. The
+  // initial value will only "stick" once the Tama firmware finishes its
+  // own boot sequence and reaches the running state — but doing it here
+  // means we overwrite whatever stale value was loaded from EEPROM and
+  // the first running tick already has the right time. The periodic
+  // check below will catch any drift / boot-init overwrite.
+  tamago_rtc_initial_sync();
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers) {
@@ -650,12 +671,15 @@ static void app_init(void)
 
   s_running = true;
   s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
+  // First RTC drift check after 15 minutes; we already initial-synced above.
+  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS, rtc_sync_tick, NULL);
 }
 
 static void app_deinit(void)
 {
   s_running = false;
-  if (s_step_timer) { app_timer_cancel(s_step_timer); s_step_timer = NULL; }
+  if (s_step_timer)     { app_timer_cancel(s_step_timer);     s_step_timer = NULL; }
+  if (s_rtc_sync_timer) { app_timer_cancel(s_rtc_sync_timer); s_rtc_sync_timer = NULL; }
   battery_state_service_unsubscribe();
   tick_timer_service_unsubscribe();
   if (s_window) { window_destroy(s_window); s_window = NULL; }
