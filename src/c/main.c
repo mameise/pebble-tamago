@@ -408,6 +408,43 @@ static void hands_update_proc(Layer *layer, GContext *ctx)
   graphics_fill_circle(ctx, center, 3);
 }
 
+// ----- Attention detection (vibration on bell-icon rising edge) ----
+//
+// The bell icon (icon 9, DRAM[7] bits 7:6) lights up when the Tama wants
+// attention — hungry, sick, needs cleaning, etc. We mirror the P1 watch-
+// face's UX: vibrate ONCE per attention "event", and stay quiet while the
+// user navigates the menus to dismiss it.
+//
+// Strategy: detect the rising edge of icon[9] (off→on). Fire vibration,
+// then disarm. Once the icon turns off again, re-arm for the next event.
+//
+// A short cooldown protects against rapid icon flicker, in case the
+// firmware blinks the bell while drawing.
+//
+// Later, when sound is added, we'll move to the full P1 logic: only fire
+// when the buzzer goes on AND attention icon is set. For now, icon-only
+// is good enough.
+#define VIBE_COOLDOWN_S    5
+static bool   s_prev_attention = false;
+static time_t s_last_vibe_time = 0;
+static bool   s_vibration_enabled = true;   // Clay setting later
+
+static void check_attention_and_vibrate(void)
+{
+  bool attention = s_icons[9] != 0;
+
+  if (attention && !s_prev_attention) {
+    // Rising edge — Tama just started asking for attention.
+    time_t now = time(NULL);
+    if (s_vibration_enabled && (now - s_last_vibe_time) >= VIBE_COOLDOWN_S) {
+      vibes_long_pulse();
+      s_last_vibe_time = now;
+      APP_LOG(APP_LOG_LEVEL_INFO, "attention: bell icon on, vibrating");
+    }
+  }
+  s_prev_attention = attention;
+}
+
 // ----- Emulator step timer ----
 
 static void step_tick(void *data)
@@ -449,6 +486,7 @@ static void step_tick(void *data)
   static uint8_t render_skip = 0;
   if ((++render_skip & 1) == 0) {
     tamago_get_icons(s_icons);
+    check_attention_and_vibrate();
     if (s_tama_bg_layer)    layer_mark_dirty(s_tama_bg_layer);
     if (s_tama_layer)       layer_mark_dirty(s_tama_layer);
     if (s_icons_top_layer)  layer_mark_dirty(s_icons_top_layer);
