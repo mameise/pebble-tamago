@@ -22,6 +22,18 @@ void tamago_rtc_initial_sync(void)
   struct tm *t = localtime(&now);
   if (!t) return;
   write_pebble_time_to_tama(t);
+
+  // Read back immediately to confirm the write took effect at the
+  // memory level. If readback fails the address mapping is broken;
+  // if it succeeds but the periodic check later sees zeros, the
+  // firmware boot code wiped our write — that's the expected case
+  // before the user has finished the egg/download flow.
+  uint8_t h = tamago_ram_read(TAMAGO_RTC_HOURS);
+  uint8_t m = tamago_ram_read(TAMAGO_RTC_MINUTES);
+  uint8_t s = tamago_ram_read(TAMAGO_RTC_SECONDS);
+  APP_LOG(APP_LOG_LEVEL_INFO,
+          "rtc_sync: readback after initial write: %02d:%02d:%02d",
+          h, m, s);
 }
 
 void tamago_rtc_periodic_check(void)
