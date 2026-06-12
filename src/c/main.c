@@ -545,6 +545,7 @@ static void step_tick(void *data)
     step_ms_sum = 0;
     step_ms_count = 0;
 
+#if TAMAGO_PROFILE
     // Profile snapshot
     tamago_profile_snapshot_t p;
     tamago_profile_snapshot_and_reset(&p);
@@ -560,19 +561,7 @@ static void step_tick(void *data)
             "prof: irqs=%lu(entered=%lu) nmis=%lu(entered=%lu)",
             (unsigned long)p.irqs, (unsigned long)p.irq_entries,
             (unsigned long)p.nmis, (unsigned long)p.nmi_entries);
-    // Derived per-opcode averages (×1000 because we don't have float)
-    if (p.opcodes) {
-      uint32_t r_per_op_x1000 = (reads_total  * 1000) / p.opcodes;
-      uint32_t w_per_op_x1000 = (writes_total * 1000) / p.opcodes;
-      APP_LOG(APP_LOG_LEVEL_INFO,
-              "prof: r/op=%lu.%03lu w/op=%lu.%03lu io%%(r)=%lu io%%(w)=%lu",
-              (unsigned long)(r_per_op_x1000 / 1000),
-              (unsigned long)(r_per_op_x1000 % 1000),
-              (unsigned long)(w_per_op_x1000 / 1000),
-              (unsigned long)(w_per_op_x1000 % 1000),
-              reads_total  ? (unsigned long)((p.reads_io  * 100) / reads_total)  : 0,
-              writes_total ? (unsigned long)((p.writes_io * 100) / writes_total) : 0);
-    }
+#endif
   }
 
   // Render every 2nd frame (10 fps display).
