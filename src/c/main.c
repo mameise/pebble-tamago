@@ -616,15 +616,30 @@ static void step_tick(void *data)
     s_dirty_state_init = true;
   }
 
-  // Adaptive frame pacing — give the OS a tiny slice between frames to
-  // handle compositing/BT/etc. Originally 5 ms, which at our step_ms ≈ 50
-  // turned every frame into 55 ms wall and cost us ~10% of target speed.
-  // 1 ms is plenty (Pebble's scheduler is fine with sub-tick gaps).
+  // Adaptive frame pacing — deadline-based.
+  //
+  // Total frame target is EMU_FRAME_MS (50ms). We measure the FULL work
+  // time of this tick (CPU + dirty-tracking + mark_dirty + everything)
+  // since t0, then sleep for (deadline - now) so the next tick starts
+  // exactly EMU_FRAME_MS after this one started.
+  //
+  // MIN_OS_GUARD_MS is the floor — we never schedule the next tick
+  // sooner than that. This gives the OS time to handle click events,
+  // backlight timeouts, BT events, display compositing etc. Originally
+  // 5 ms; lowered to 1 ms to claw back throughput, but that starved the
+  // OS and the backlight would drop out under load. 3 ms is the sweet
+  // spot: enough for OS responsiveness, small enough that we don't
+  // bleed measurable cycles.
+  #define MIN_OS_GUARD_MS  3
+
+  time_ms(&epoch_s, &epoch_ms);
+  uint32_t t_now = (uint32_t)epoch_s * 1000 + epoch_ms;
+  uint32_t work_ms = t_now - t0;
   uint32_t next_delay;
-  if (step_ms + 1 >= EMU_FRAME_MS) {
-    next_delay = 1;
+  if (work_ms + MIN_OS_GUARD_MS >= EMU_FRAME_MS) {
+    next_delay = MIN_OS_GUARD_MS;
   } else {
-    next_delay = EMU_FRAME_MS - step_ms;
+    next_delay = EMU_FRAME_MS - work_ms;
   }
   s_step_timer = app_timer_register(next_delay, step_tick, NULL);
 }
