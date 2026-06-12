@@ -43,6 +43,13 @@ extern uint8_t g_static_rom[TAMAGO_STATIC_ROM_SIZE];
 // IRQ vector table (16 entries, loaded once at init).
 extern uint16_t g_irq_vectors[16];
 
+// Set non-zero by tamago_fire_irq whenever it sets a bit in cpureg[$73:$74].
+// Cleared by tamago_cpu_irq when it services the highest-priority pending
+// IRQ. The CPU step checks this single byte instead of reloading both
+// cpureg bytes on every instruction — at ~3 million steps/sec that saves
+// ~6 million memory loads/sec.
+extern uint8_t g_irq_pending_any;
+
 // Misc runtime state.
 extern uint8_t  g_rom_bank_id;
 extern bool     g_rom_loaded;

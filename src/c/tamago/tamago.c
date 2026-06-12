@@ -20,6 +20,7 @@ uint8_t   g_cpureg[TAMAGO_CPUREG_SIZE];
 uint8_t   g_rom_bank_buf[TAMAGO_ROM_BANK_SIZE];
 uint8_t   g_static_rom[TAMAGO_STATIC_ROM_SIZE];
 uint16_t  g_irq_vectors[16];
+uint8_t   g_irq_pending_any;
 uint8_t   g_rom_bank_id;
 bool      g_rom_loaded;
 uint8_t   g_keys;

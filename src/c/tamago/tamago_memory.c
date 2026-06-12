@@ -144,9 +144,12 @@ static void io_write_bank(uint8_t reg, uint8_t value)
   tamago_set_rom_bank(value);
 }
 
+// $3073, $3074: IRQ pending flags. Writes acknowledge (clear) pending bits.
 static void io_write_int_flag(uint8_t reg, uint8_t value)
 {
   g_cpureg[reg] &= ~value;
+  // Recompute the fast-path cache flag.
+  g_irq_pending_any = (g_cpureg[0x73] | g_cpureg[0x74]) != 0;
 }
 
 static void io_write_porta(uint8_t reg, uint8_t value)
@@ -216,6 +219,8 @@ void tamago_fire_irq(uint8_t i)
   uint16_t mask = (g_cpureg[0x70] << 8) | g_cpureg[0x71];
   if (!((0x8000 >> i) & mask)) return;
   g_cpureg[0x73 + (i >> 3)] |= 0x80 >> (i & 7);
+  // Set the fast-path cache flag so the CPU step sees it cheaply.
+  g_irq_pending_any = 1;
 }
 
 void tamago_fire_nmi(uint8_t i)

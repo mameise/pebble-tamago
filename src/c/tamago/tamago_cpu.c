@@ -165,6 +165,11 @@ void tamago_cpu_irq(void)
   push(pack_p());
   CPU.pc = g_irq_vectors[idx];
   s_flag_i = 1;
+  // The ROM's IRQ handler will write to $3074 to clear the pending bit
+  // (which our io_write_int_flag refreshes g_irq_pending_any from). But
+  // for safety, refresh here too — covers cases where the cache might
+  // be out of sync.
+  g_irq_pending_any = (g_cpureg[0x73] | g_cpureg[0x74]) != 0;
 }
 
 // ----- Addressing mode resolvers ------------------------------------------
@@ -456,9 +461,10 @@ uint8_t tamago_cpu_step(void) __attribute__((hot));
 uint8_t tamago_cpu_step(void)
 {
   // Fire pending IRQs before fetching the next instruction.
-  if (!s_flag_i) {
-    uint16_t pending = (g_cpureg[0x73] << 8) | g_cpureg[0x74];
-    if (pending) tamago_cpu_irq();
+  // Fast path: a single byte cache flag, updated by tamago_fire_irq and
+  // io_write_int_flag. Avoids reading cpureg[$73:$74] on every step.
+  if (g_irq_pending_any && !s_flag_i) {
+    tamago_cpu_irq();
   }
 
   uint8_t opcode = fetch();
