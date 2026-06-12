@@ -1212,13 +1212,14 @@ static void rtc_sync_tick(void *data)
 {
   s_rtc_sync_timer = NULL;
   if (!s_running) return;
-  APP_LOG(APP_LOG_LEVEL_INFO, "rtc_sync_tick: fired");
   tamago_rtc_periodic_check();
   s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS,
                                         rtc_sync_tick, NULL);
   if (!s_rtc_sync_timer) {
+    // Defensive — if Pebble's timer pool is full we lose the sync chain.
+    // Hasn't happened in testing but worth flagging.
     APP_LOG(APP_LOG_LEVEL_ERROR,
-            "rtc_sync_tick: app_timer_register FAILED — timer pool exhausted?");
+            "rtc_sync_tick: app_timer_register failed");
   }
 }
 
