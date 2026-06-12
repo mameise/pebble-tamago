@@ -124,4 +124,10 @@ uint16_t tamago_debug_dram_nonzero_count(void);
 uint32_t tamago_serialize_state(uint8_t *buf, uint32_t bufsize);
 bool tamago_deserialize_state(const uint8_t *buf, uint32_t bufsize);
 
+// Direct WRAM read/write. Used by the RTC sync code to poke the
+// emulator's internal time counters. `addr` must be in the 0x0000-0x0FFF
+// WRAM range — addresses outside that range are silently ignored.
+uint8_t tamago_ram_read(uint16_t addr);
+void    tamago_ram_write(uint16_t addr, uint8_t val);
+
 #endif // TAMAGO_H

@@ -202,6 +202,22 @@ void tamago_set_buttons(uint8_t mask)
   g_keys = lo | 0xF0;
 }
 
+// ----- WRAM direct access (used by RTC sync) ------------------------------
+
+uint8_t tamago_ram_read(uint16_t addr)
+{
+  if (!g_initialised) return 0;
+  if (addr >= TAMAGO_WRAM_SIZE) return 0;
+  return g_wram[addr];
+}
+
+void tamago_ram_write(uint16_t addr, uint8_t val)
+{
+  if (!g_initialised) return;
+  if (addr >= TAMAGO_WRAM_SIZE) return;
+  g_wram[addr] = val;
+}
+
 // ----- Debug --------------------------------------------------------------
 
 void tamago_debug_get_state(uint16_t *pc, uint8_t *a, uint8_t *x, uint8_t *y,
