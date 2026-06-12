@@ -57,9 +57,7 @@ int32_t tamago_rtc_periodic_check(void)
     return 0;
   }
 
-  // Compute drift in seconds. We consider a same-day window — if the
-  // Tama is at 23:59 and Pebble is at 00:01, the absolute diff modulo
-  // a day is small.
+  // Compute drift for logging only — we always resync.
   int32_t tama_secs = th * 3600 + tm * 60 + ts;
   int32_t real_secs = t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec;
   int32_t drift = real_secs - tama_secs;
@@ -67,12 +65,11 @@ int32_t tamago_rtc_periodic_check(void)
   if (drift < -43200) drift += 86400;
   int32_t abs_drift = drift < 0 ? -drift : drift;
 
-  if (abs_drift > TAMAGO_RTC_DRIFT_THRESHOLD_S) {
-    APP_LOG(APP_LOG_LEVEL_INFO,
-            "rtc_sync: tama=%02d:%02d:%02d real=%02d:%02d:%02d drift=%lds (resync)",
-            th, tm, ts, t->tm_hour, t->tm_min, t->tm_sec, (long)drift);
-    write_pebble_time_to_tama(t);
-  }
-  // (drift within threshold → no log, no resync)
+  // Always log so we can verify the timer is firing on schedule.
+  // TODO: drop to "only if drift >= 2" once we've confirmed.
+  APP_LOG(APP_LOG_LEVEL_INFO,
+          "rtc_sync: tama=%02d:%02d:%02d real=%02d:%02d:%02d drift=%lds (resync)",
+          th, tm, ts, t->tm_hour, t->tm_min, t->tm_sec, (long)drift);
+  write_pebble_time_to_tama(t);
   return abs_drift;
 }
