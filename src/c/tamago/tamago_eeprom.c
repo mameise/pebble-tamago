@@ -145,11 +145,13 @@ void tamago_eeprom_update(uint8_t power, uint8_t clk, uint8_t data)
   // Data transition while CLK high = START/STOP condition.
   if (clk && data_d) {
     if (data_d > 0) {
-      // STOP condition. If we were writing, commit dirty pages now —
-      // matches the JS code's localStorage.eeprom_data flush.
-      if (s_state == ST_WRITE) {
-        tamago_eeprom_flush();
-      }
+      // STOP condition. The page was marked dirty when we received the
+      // last write byte; the actual persist_write_data() flush is
+      // deferred to the periodic timer in main.c (every 60s) plus
+      // tamago_release() on app exit. Persist writes are flash-backed
+      // (~10 ms each) and the ROM does dense write bursts during boot
+      // and save points — flushing eagerly here drops the emulator
+      // throughput by ~50% on heavy-write phases.
       s_state  = ST_DISABLED;
       s_output = 0;
     } else {
