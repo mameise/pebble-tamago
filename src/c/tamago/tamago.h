@@ -130,8 +130,4 @@ bool tamago_deserialize_state(const uint8_t *buf, uint32_t bufsize);
 uint8_t tamago_ram_read(uint16_t addr);
 void    tamago_ram_write(uint16_t addr, uint8_t val);
 
-// Debug aid: log all writes to unmapped I/O registers since the last
-// dump, then reset. Used for reverse-engineering the SPU (sound) regs.
-void    tamago_io_dump_counters(void);
-
 #endif // TAMAGO_H

@@ -72,7 +72,6 @@ extern uint8_t *tamago_write_page[256];
 
 uint8_t tamago_io_read(uint16_t addr);
 void    tamago_io_write(uint16_t addr, uint8_t value);
-void    tamago_io_dump_counters(void);
 
 #define TAMAGO_INLINE static inline __attribute__((always_inline))
 
