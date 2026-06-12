@@ -529,14 +529,50 @@ static void step_tick(void *data)
 
   // Debug log every ~60 seconds.
   static uint32_t dbg_ctr = 0;
+  static uint32_t step_ms_sum = 0;
+  static uint32_t step_ms_count = 0;
+  step_ms_sum += step_ms;
+  step_ms_count++;
   if (++dbg_ctr >= EMU_FPS * 60) {
     dbg_ctr = 0;
     uint16_t pc; uint8_t a, x, y, s, bank;
     tamago_debug_get_state(&pc, &a, &x, &y, &s, &bank);
+    uint32_t step_avg = step_ms_count ? step_ms_sum / step_ms_count : 0;
     APP_LOG(APP_LOG_LEVEL_INFO,
-            "tamago: PC=$%04x bank=%d steps=%lukc step=%lums",
+            "tamago: PC=$%04x bank=%d steps=%lukc step_avg=%lums",
             pc, bank, (unsigned long)(s_total_steps / 1000),
-            (unsigned long)step_ms);
+            (unsigned long)step_avg);
+    step_ms_sum = 0;
+    step_ms_count = 0;
+
+    // Profile snapshot
+    tamago_profile_snapshot_t p;
+    tamago_profile_snapshot_and_reset(&p);
+    uint32_t reads_total  = p.reads_fast  + p.reads_io;
+    uint32_t writes_total = p.writes_fast + p.writes_io + p.writes_dropped;
+    APP_LOG(APP_LOG_LEVEL_INFO,
+            "prof: ops=%lu r=%lu(io=%lu) w=%lu(io=%lu drop=%lu)",
+            (unsigned long)p.opcodes,
+            (unsigned long)reads_total, (unsigned long)p.reads_io,
+            (unsigned long)writes_total, (unsigned long)p.writes_io,
+            (unsigned long)p.writes_dropped);
+    APP_LOG(APP_LOG_LEVEL_INFO,
+            "prof: irqs=%lu(entered=%lu) nmis=%lu(entered=%lu)",
+            (unsigned long)p.irqs, (unsigned long)p.irq_entries,
+            (unsigned long)p.nmis, (unsigned long)p.nmi_entries);
+    // Derived per-opcode averages (×1000 because we don't have float)
+    if (p.opcodes) {
+      uint32_t r_per_op_x1000 = (reads_total  * 1000) / p.opcodes;
+      uint32_t w_per_op_x1000 = (writes_total * 1000) / p.opcodes;
+      APP_LOG(APP_LOG_LEVEL_INFO,
+              "prof: r/op=%lu.%03lu w/op=%lu.%03lu io%%(r)=%lu io%%(w)=%lu",
+              (unsigned long)(r_per_op_x1000 / 1000),
+              (unsigned long)(r_per_op_x1000 % 1000),
+              (unsigned long)(w_per_op_x1000 / 1000),
+              (unsigned long)(w_per_op_x1000 % 1000),
+              reads_total  ? (unsigned long)((p.reads_io  * 100) / reads_total)  : 0,
+              writes_total ? (unsigned long)((p.writes_io * 100) / writes_total) : 0);
+    }
   }
 
   // Render every 2nd frame (10 fps display).
@@ -1158,32 +1194,20 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
 
 // ----- App init / deinit ----
 
-// Periodic RTC sync — adaptive interval. The Tama firmware overwrites
-// our initial-sync write during its boot (settles to 09:00:00 default).
-// So the first periodic check needs to fire quickly to catch that and
-// re-sync. After we've seen a small drift once, the clock is stable
-// and we can fall back to 15 minutes.
-#define RTC_SYNC_INTERVAL_FAST_MS  (60 * 1000)        // first checks
-#define RTC_SYNC_INTERVAL_SLOW_MS  (15 * 60 * 1000)   // after we settle
+// Periodic RTC sync — fixed 30s interval. We always sync (no threshold)
+// because the Tama clock runs ~15% slow on our emulator. 30s interval
+// keeps max drift around 4-5s. The cost is 3 RAM-byte writes per sync;
+// negligible.
+#define RTC_SYNC_INTERVAL_MS  (30 * 1000)
 static AppTimer *s_rtc_sync_timer;
-static bool      s_rtc_settled = false;   // true once drift was small once
 
 static void rtc_sync_tick(void *data)
 {
   s_rtc_sync_timer = NULL;
   if (!s_running) return;
-  int32_t abs_drift = tamago_rtc_periodic_check();
-  // Once we've seen drift stay within the small-drift band, switch to
-  // the slow interval. If we ever see a big drift again (e.g. user
-  // pressed Reset), we fall back to fast checks.
-  if (abs_drift <= TAMAGO_RTC_DRIFT_THRESHOLD_S) {
-    s_rtc_settled = true;
-  } else {
-    s_rtc_settled = false;
-  }
-  uint32_t next_ms = s_rtc_settled ? RTC_SYNC_INTERVAL_SLOW_MS
-                                   : RTC_SYNC_INTERVAL_FAST_MS;
-  s_rtc_sync_timer = app_timer_register(next_ms, rtc_sync_tick, NULL);
+  tamago_rtc_periodic_check();
+  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS,
+                                        rtc_sync_tick, NULL);
 }
 
 static void app_init(void)
@@ -1220,8 +1244,7 @@ static void app_init(void)
 
   s_running = true;
   s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
-  // First RTC check uses the fast interval to catch the boot-clobber.
-  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_FAST_MS,
+  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS,
                                         rtc_sync_tick, NULL);
 }
 
