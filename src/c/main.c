@@ -121,6 +121,8 @@ static uint8_t s_hands_thickness;      // 0=Thick, 1=Medium, 2=Thin
 static GColor  s_text_color;
 static bool    s_text_outline_enabled;
 static GColor  s_text_outline_color;
+static uint8_t s_time_format;        // 0=Auto, 1=24h, 2=12h
+static uint8_t s_date_format;        // 0=European, 1=American, 2=ISO
 
 // 4-level grayscale palette (matches JS PALETTE).
 static GColor s_palette[4];
@@ -678,7 +680,16 @@ static void apply_text_style(void)
 
 static void update_time_and_date(struct tm *t)
 {
-  if (clock_is_24h_style()) {
+  // ---- Time format ----
+  bool use_24h;
+  switch (s_time_format) {
+    case 1:  use_24h = true;  break;   // forced 24h
+    case 2:  use_24h = false; break;   // forced 12h
+    case 0:                            // auto (follow system)
+    default: use_24h = clock_is_24h_style(); break;
+  }
+
+  if (use_24h) {
     strftime(s_time_text, sizeof(s_time_text), "%H:%M", t);
   } else {
     strftime(s_time_text, sizeof(s_time_text), "%I:%M", t);
@@ -688,7 +699,15 @@ static void update_time_and_date(struct tm *t)
   }
   set_text_with_shadows(s_time_layer, s_time_shadow, s_time_text);
 
-  strftime(s_date_text, sizeof(s_date_text), "%a %d %b", t);
+  // ---- Date format ----
+  const char *date_fmt;
+  switch (s_date_format) {
+    case 1:  date_fmt = "%a %b %d"; break;    // American: Fri Jun 12
+    case 2:  date_fmt = "%Y-%m-%d"; break;    // ISO:      2026-06-12
+    case 0:                                    // European: Fri 12 Jun
+    default: date_fmt = "%a %d %b"; break;
+  }
+  strftime(s_date_text, sizeof(s_date_text), date_fmt, t);
   set_text_with_shadows(s_date_layer, s_date_shadow, s_date_text);
 
   // Hands need to redraw too.
@@ -702,8 +721,11 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed)
 
 static void battery_handler(BatteryChargeState state)
 {
-  snprintf(s_battery_text, sizeof(s_battery_text), "%d%%",
-           (int)state.charge_percent);
+  // "+" prefix when charging (e.g. "+65%") to make the charge state
+  // visible at a glance. Matches Pebble's stock conventions.
+  const char *prefix = state.is_charging ? "+" : "";
+  snprintf(s_battery_text, sizeof(s_battery_text), "%s%d%%",
+           prefix, (int)state.charge_percent);
   set_text_with_shadows(s_battery_layer, s_battery_shadow, s_battery_text);
 }
 
@@ -902,6 +924,8 @@ static void window_unload(Window *window)
 #define PERSIST_KEY_TEXT_COLOR          11
 #define PERSIST_KEY_TEXT_OUTLINE        12
 #define PERSIST_KEY_TEXT_OUTLINE_COLOR  13
+#define PERSIST_KEY_TIME_FORMAT         14
+#define PERSIST_KEY_DATE_FORMAT         15
 
 // Runtime setting state — declarations are at the top of the file
 // (forward-declared so the early update_proc functions can use them).
@@ -1019,6 +1043,16 @@ static void load_settings(void)
     s_text_outline_color = GColorWhite;
   }
 
+  s_time_format = persist_exists(PERSIST_KEY_TIME_FORMAT)
+                ? (uint8_t)persist_read_int(PERSIST_KEY_TIME_FORMAT)
+                : 0;
+  if (s_time_format > 2) s_time_format = 0;
+
+  s_date_format = persist_exists(PERSIST_KEY_DATE_FORMAT)
+                ? (uint8_t)persist_read_int(PERSIST_KEY_DATE_FORMAT)
+                : 0;
+  if (s_date_format > 2) s_date_format = 0;
+
   update_palette_from_color(s_tama_pixel_color);
 }
 
@@ -1037,6 +1071,8 @@ static void save_settings(void)
   persist_write_int (PERSIST_KEY_TEXT_COLOR,           s_text_color.argb);
   persist_write_bool(PERSIST_KEY_TEXT_OUTLINE,         s_text_outline_enabled);
   persist_write_int (PERSIST_KEY_TEXT_OUTLINE_COLOR,   s_text_outline_color.argb);
+  persist_write_int (PERSIST_KEY_TIME_FORMAT,          s_time_format);
+  persist_write_int (PERSIST_KEY_DATE_FORMAT,          s_date_format);
 }
 
 // ----- AppMessage (Clay settings round-trip) ------------------------------
@@ -1169,6 +1205,37 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
             (unsigned long)hex);
   }
 
+  bool changed_time_date = false;
+  t = dict_find(iter, MESSAGE_KEY_TimeFormat);
+  if (t) {
+    uint8_t fmt = 0;
+    if (t->type == TUPLE_CSTRING && t->length > 0) {
+      fmt = (uint8_t)atoi(t->value->cstring);
+    } else if (t->type == TUPLE_INT) {
+      fmt = (uint8_t)t->value->int32;
+    }
+    if (fmt > 2) fmt = 0;
+    s_time_format = fmt;
+    changed_time_date = true;
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: TimeFormat = %d",
+            (int)s_time_format);
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_DateFormat);
+  if (t) {
+    uint8_t fmt = 0;
+    if (t->type == TUPLE_CSTRING && t->length > 0) {
+      fmt = (uint8_t)atoi(t->value->cstring);
+    } else if (t->type == TUPLE_INT) {
+      fmt = (uint8_t)t->value->int32;
+    }
+    if (fmt > 2) fmt = 0;
+    s_date_format = fmt;
+    changed_time_date = true;
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: DateFormat = %d",
+            (int)s_date_format);
+  }
+
   // Reset Tama if the user toggled it on. Wipes EEPROM + resets the CPU
   // so the Tama firmware boots from a blank slate (first-time setup
   // screen / egg select). The toggle itself isn't persisted — it only
@@ -1186,6 +1253,12 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
   }
   if (changed_text_style) {
     apply_text_style();
+  }
+  if (changed_time_date) {
+    // Re-format time/date text immediately so the user sees the new
+    // format without waiting for the next tick.
+    time_t now = time(NULL);
+    update_time_and_date(localtime(&now));
   }
 
   save_settings();
