@@ -61,6 +61,46 @@ module.exports = [
   },
 
   {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Watch Face"
+      },
+      {
+        "type": "color",
+        "messageKey": "BgFillColor",
+        "label": "Background color",
+        "description": "Fill color of the watch face area outside the Tama.",
+        "defaultValue": "AAAAAA",
+        "sunlight": true,
+        "allowGray": true
+      },
+      {
+        "type": "color",
+        "messageKey": "BgMarkersColor",
+        "label": "Hour markers color",
+        "description": "Color of the hour markers around the edge of the watchface.",
+        "defaultValue": "000000",
+        "sunlight": true,
+        "allowGray": true
+      },
+      {
+        "type": "select",
+        "messageKey": "BgMarkersStyle",
+        "label": "Hour markers style",
+        "description": "Shape of the markers around the watchface edge.",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Arabic numerals (12, 1, 2...)", "value": "0" },
+          { "label": "Roman numerals (XII, I, II...)", "value": "1" },
+          { "label": "Ticks (dashes)", "value": "2" }
+        ]
+      }
+    ]
+  },
+
+  {
     "type": "submit",
     "defaultValue": "Save Settings"
   }
