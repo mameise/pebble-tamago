@@ -29,14 +29,24 @@
 #define TAMA_DRAW_W     (TAMAGO_LCD_WIDTH  * TAMA_SCALE)
 #define TAMA_DRAW_H     (TAMAGO_LCD_HEIGHT * TAMA_SCALE)
 
+// Status icon layout: 5 icons in each row (top + bottom), each 12×12 px
+// rendered at 1× scale plus 4 px horizontal gap between icons.
+#define ICON_W           12
+#define ICON_H           12
+#define ICON_GAP          4
+#define ICON_ROW_W       (5 * ICON_W + 4 * ICON_GAP)   // = 76 px
+
 // ----- State ----
 
 static Window     *s_window;
 static Layer      *s_tama_layer;
+static Layer      *s_icons_top_layer;
+static Layer      *s_icons_bot_layer;
 static TextLayer  *s_status_layer;
 static AppTimer   *s_step_timer;
 static char        s_status_text[64];
 static uint8_t     s_framebuffer[TAMAGO_LCD_WIDTH * TAMAGO_LCD_HEIGHT];
+static uint8_t     s_icons[TAMAGO_ICON_COUNT];
 static uint32_t    s_total_steps;
 static bool        s_running;
 
@@ -44,6 +54,65 @@ static bool        s_running;
 // matching the JS PALETTE [0xffdddddd, 0xff9e9e9e, 0xff606060, 0xff222222].
 // On color Pebble we approximate with grays; on B&W we'd use the dither.
 static GColor s_palette[4];
+
+// ----- Status icon bitmaps ----
+//
+// Each icon is a 12×12 monochrome bitmap. Bit 11 of each row word is the
+// leftmost pixel (i.e. row & 0x800 = first pixel). Bit 0 is unused —
+// keeps the values readable as 12-bit numbers.
+//
+// Generated from ASCII art (see /tmp/gen_icons.py in the repo history).
+// Icons match the FontAwesome glyphs used by the JS reference:
+// dashboard, food, trash, globe, user (top row); comments, medkit,
+// heart, book, bell (bottom row).
+
+static const uint16_t icon_dashboard[12] = {
+  0x000, 0x000, 0x000, 0x7FE, 0x000, 0x7FE,
+  0x000, 0x7FE, 0x000, 0x000, 0x000, 0x000,
+};
+static const uint16_t icon_food[12] = {
+  0x000, 0x6D8, 0x6D8, 0x6D8, 0x248, 0x3F0,
+  0x0C0, 0x0C0, 0x0C0, 0x0C0, 0x0C0, 0x000,
+};
+static const uint16_t icon_trash[12] = {
+  0x000, 0x1F8, 0x0F0, 0x7FE, 0x7FE, 0x2D0,
+  0x2D0, 0x2D0, 0x2D0, 0x2D0, 0x1F8, 0x000,
+};
+static const uint16_t icon_globe[12] = {
+  0x000, 0x0F0, 0x1F8, 0x36C, 0x7FE, 0x3FC,
+  0x3FC, 0x7FE, 0x36C, 0x1F8, 0x0F0, 0x000,
+};
+static const uint16_t icon_user[12] = {
+  0x000, 0x060, 0x0F0, 0x0F0, 0x060, 0x000,
+  0x1F8, 0x3FC, 0x36C, 0x36C, 0x000, 0x000,
+};
+static const uint16_t icon_comments[12] = {
+  0x000, 0x7F8, 0x618, 0x618, 0x618, 0x7F8,
+  0x600, 0x600, 0x000, 0x000, 0x000, 0x000,
+};
+static const uint16_t icon_medkit[12] = {
+  0x000, 0x0F0, 0x0F0, 0x0F0, 0x7FE, 0x7FE,
+  0x7FE, 0x0F0, 0x0F0, 0x0F0, 0x000, 0x000,
+};
+static const uint16_t icon_heart[12] = {
+  0x000, 0x30C, 0x79E, 0x7FE, 0x7FE, 0x3FC,
+  0x3FC, 0x1F8, 0x0F0, 0x060, 0x000, 0x000,
+};
+static const uint16_t icon_book[12] = {
+  0x000, 0x7FE, 0x6FC, 0x6FC, 0x6FC, 0x6FC,
+  0x6FC, 0x6FC, 0x6FC, 0x7FE, 0x000, 0x000,
+};
+static const uint16_t icon_bell[12] = {
+  0x000, 0x060, 0x0F0, 0x1F8, 0x3FC, 0x3FC,
+  0x7FE, 0x7FE, 0x7FE, 0x000, 0x0F0, 0x000,
+};
+
+// Icon order matches tamago_get_icons output indices. Top row 0..4,
+// bottom row 5..9.
+static const uint16_t *s_icon_bitmaps[TAMAGO_ICON_COUNT] = {
+  icon_dashboard, icon_food, icon_trash,    icon_globe,  icon_user,
+  icon_comments,  icon_medkit, icon_heart,  icon_book,   icon_bell,
+};
 
 // ----- Display rendering ----
 //
@@ -112,6 +181,70 @@ static void tama_layer_update(Layer *layer, GContext *ctx)
   }
 
   graphics_release_frame_buffer(ctx, fb);
+}
+
+// ----- Status icons rendering ----
+//
+// Renders one row (5 icons) for the given layer. The "first_icon" index
+// tells us which slice of s_icons to read — 0 for the top row,
+// 5 for the bottom row. We use the same direct-framebuffer write path
+// as the tama display since graphics_draw_pixel for ~10*144 pixels per
+// frame is slow.
+static void icons_row_update(Layer *layer, GContext *ctx, int first_icon)
+{
+  GBitmap *fb = graphics_capture_frame_buffer(ctx);
+  if (!fb) return;
+
+  uint8_t  *data       = gbitmap_get_data(fb);
+  uint16_t  row_bytes  = gbitmap_get_bytes_per_row(fb);
+  GRect     fb_bounds  = gbitmap_get_bounds(fb);
+  GRect     frame      = layer_get_frame(layer);
+
+  // Center the row of icons within the layer.
+  int row_x0 = frame.origin.x + (frame.size.w - ICON_ROW_W) / 2;
+  int row_y0 = frame.origin.y + (frame.size.h - ICON_H) / 2;
+
+  uint8_t pal_on = s_palette[3].argb;   // darkest gray = "lit" icon
+
+  for (int i = 0; i < 5; i++) {
+    uint8_t intensity = s_icons[first_icon + i] & 0x3;
+    if (intensity == 0) continue;     // icon is off — skip
+
+    // Pick a palette entry by intensity. The JS uses the same 4-level
+    // grayscale; we just map 1→index 1, 2→2, 3→3.
+    uint8_t pal_byte = s_palette[intensity].argb;
+    (void)pal_on;
+
+    const uint16_t *bm = s_icon_bitmaps[first_icon + i];
+    int icon_x0 = row_x0 + i * (ICON_W + ICON_GAP);
+
+    for (int row = 0; row < ICON_H; row++) {
+      uint16_t bits = bm[row];
+      int py = row_y0 + row;
+      if (py < fb_bounds.origin.y ||
+          py >= fb_bounds.origin.y + fb_bounds.size.h) continue;
+
+      for (int col = 0; col < ICON_W; col++) {
+        if (!(bits & (0x800 >> col))) continue;
+        int px = icon_x0 + col;
+        if (px < fb_bounds.origin.x ||
+            px >= fb_bounds.origin.x + fb_bounds.size.w) continue;
+        data[py * row_bytes + px] = pal_byte;
+      }
+    }
+  }
+
+  graphics_release_frame_buffer(ctx, fb);
+}
+
+static void icons_top_update(Layer *layer, GContext *ctx)
+{
+  icons_row_update(layer, ctx, 0);
+}
+
+static void icons_bot_update(Layer *layer, GContext *ctx)
+{
+  icons_row_update(layer, ctx, 5);
 }
 
 // ----- Emulator step timer ----
@@ -183,12 +316,13 @@ static void step_tick(void *data)
     bucket_wall_ms = 0;
   }
 
-  // Periodic EEPROM flush every 60 seconds. The EEPROM also flushes
-  // automatically on each I²C STOP-after-WRITE, but this catches the
-  // case where the watch loses power mid-write or the user force-quits
-  // the app. Keeps lost progress to under a minute in the worst case.
+  // Periodic EEPROM flush. We mark pages dirty in the bus state machine
+  // but defer the slow persist_write_data() to here so write bursts
+  // don't tank emulation throughput. Worst-case data loss on a hard
+  // crash is one flush interval — 5 minutes is plenty fine for a
+  // Tamagotchi (matches what the P1 emulator uses).
   static uint32_t flush_ctr = 0;
-  if (++flush_ctr >= EMU_FPS * 60) {
+  if (++flush_ctr >= EMU_FPS * 300) {  // 5 minutes
     flush_ctr = 0;
     tamago_eeprom_flush();
   }
@@ -199,8 +333,12 @@ static void step_tick(void *data)
   // significant chunk of our budget. Halving it frees CPU time to keep
   // the emulator at full speed.
   static uint8_t render_skip = 0;
-  if (s_tama_layer && (++render_skip & 1) == 0) {
-    layer_mark_dirty(s_tama_layer);
+  if ((++render_skip & 1) == 0) {
+    // Pull icon state once per render and stash it for the icon layers.
+    tamago_get_icons(s_icons);
+    if (s_tama_layer)      layer_mark_dirty(s_tama_layer);
+    if (s_icons_top_layer) layer_mark_dirty(s_icons_top_layer);
+    if (s_icons_bot_layer) layer_mark_dirty(s_icons_bot_layer);
   }
 
   // Adaptive frame pacing: aim for one frame every EMU_FRAME_MS ms of
@@ -253,8 +391,17 @@ static void window_load(Window *window)
   Layer *root = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(root);
 
-  // Status text at the top.
-  s_status_layer = text_layer_create(GRect(0, 4, bounds.size.w, 22));
+  // Vertical layout on Emery (200×228):
+  //   0..18   status text (single line)
+  //   20..36  top icon row (5 icons, 12 px tall + 4 px margin)
+  //   40..133 tama display (3× scaled = 144×93, centered horizontally)
+  //   136..152 bottom icon row
+  //
+  // The tama layer is full-width and centers the scaled framebuffer
+  // inside itself; the icon layers are also full-width and the
+  // renderer centers the 5-icon row inside.
+
+  s_status_layer = text_layer_create(GRect(0, 0, bounds.size.w, 20));
   text_layer_set_text_alignment(s_status_layer, GTextAlignmentCenter);
   text_layer_set_font(s_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
   text_layer_set_background_color(s_status_layer, GColorClear);
@@ -262,16 +409,29 @@ static void window_load(Window *window)
   text_layer_set_text(s_status_layer, "Tama-Go starting...");
   layer_add_child(root, text_layer_get_layer(s_status_layer));
 
-  // Tama display layer below.
-  s_tama_layer = layer_create(GRect(0, 30, bounds.size.w, bounds.size.h - 30));
+  s_icons_top_layer = layer_create(GRect(0, 20, bounds.size.w, 18));
+  layer_set_update_proc(s_icons_top_layer, icons_top_update);
+  layer_add_child(root, s_icons_top_layer);
+
+  // Tama display layer below the top icons. Height covers the rest
+  // minus the bottom-icon row.
+  s_tama_layer = layer_create(GRect(0, 40, bounds.size.w,
+                                    bounds.size.h - 40 - 20));
   layer_set_update_proc(s_tama_layer, tama_layer_update);
   layer_add_child(root, s_tama_layer);
+
+  s_icons_bot_layer = layer_create(GRect(0, bounds.size.h - 20,
+                                         bounds.size.w, 18));
+  layer_set_update_proc(s_icons_bot_layer, icons_bot_update);
+  layer_add_child(root, s_icons_bot_layer);
 }
 
 static void window_unload(Window *window)
 {
-  if (s_tama_layer)   { layer_destroy(s_tama_layer);          s_tama_layer = NULL; }
-  if (s_status_layer) { text_layer_destroy(s_status_layer);   s_status_layer = NULL; }
+  if (s_icons_bot_layer) { layer_destroy(s_icons_bot_layer); s_icons_bot_layer = NULL; }
+  if (s_tama_layer)      { layer_destroy(s_tama_layer);      s_tama_layer = NULL; }
+  if (s_icons_top_layer) { layer_destroy(s_icons_top_layer); s_icons_top_layer = NULL; }
+  if (s_status_layer)    { text_layer_destroy(s_status_layer); s_status_layer = NULL; }
 }
 
 // ----- App init ----
