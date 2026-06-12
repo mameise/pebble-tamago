@@ -24,6 +24,11 @@
 
 #include <pebble.h>
 
+// Compile-time profile switch. Set to 1 to enable per-opcode / per-read /
+// per-write counters (logged once a minute from main.c). Adds ~10-15%
+// CPU overhead — keep OFF in production.
+#define TAMAGO_PROFILE 0
+
 // Display dimensions (native Tama-Go hardware).
 //
 // The display is 48 pixels wide × 31 pixels high — this comes from the

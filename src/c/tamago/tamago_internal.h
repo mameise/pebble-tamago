@@ -75,8 +75,11 @@ void    tamago_io_write(uint16_t addr, uint8_t value);
 
 // ----- Profiling counters (referenced by the inline read/write below) -----
 //
-// Bumped from the hot path. Cost per increment is one load + add + store
-// (small but nonzero).
+// TAMAGO_PROFILE is set in the public tamago.h. When OFF (the production
+// default), PROFILE_INC compiles to nothing and the counter struct
+// isn't even instantiated.
+
+#if TAMAGO_PROFILE
 typedef struct {
   uint32_t opcodes;        // tamago_cpu_step calls
   uint32_t reads_fast;     // hit page-table (WRAM/DRAM/ROM)
@@ -91,14 +94,18 @@ typedef struct {
 } tamago_profile_t;
 
 extern tamago_profile_t g_tamago_profile;
+#  define PROFILE_INC(field)  (g_tamago_profile.field++)
+#else
+#  define PROFILE_INC(field)  ((void)0)
+#endif
 
 #define TAMAGO_INLINE static inline __attribute__((always_inline))
 
 TAMAGO_INLINE uint8_t tamago_read(uint16_t addr)
 {
   uint8_t *page = tamago_read_page[addr >> 8];
-  if (page) { g_tamago_profile.reads_fast++; return page[addr & 0xFF]; }
-  g_tamago_profile.reads_io++;
+  if (page) { PROFILE_INC(reads_fast); return page[addr & 0xFF]; }
+  PROFILE_INC(reads_io);
   return tamago_io_read(addr);
 }
 
@@ -112,9 +119,9 @@ TAMAGO_INLINE uint16_t tamago_read16(uint16_t addr)
 TAMAGO_INLINE void tamago_write(uint16_t addr, uint8_t value)
 {
   uint8_t *page = tamago_write_page[addr >> 8];
-  if (page) { g_tamago_profile.writes_fast++; page[addr & 0xFF] = value; return; }
-  if ((addr >> 12) == 0x3) { g_tamago_profile.writes_io++; tamago_io_write(addr, value); return; }
-  g_tamago_profile.writes_dropped++;
+  if (page) { PROFILE_INC(writes_fast); page[addr & 0xFF] = value; return; }
+  if ((addr >> 12) == 0x3) { PROFILE_INC(writes_io); tamago_io_write(addr, value); return; }
+  PROFILE_INC(writes_dropped);
 }
 
 // ROM banking
