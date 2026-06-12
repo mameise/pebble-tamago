@@ -89,6 +89,16 @@ uint8_t tamago_step_one(void);
 // level). `out` must be at least TAMAGO_LCD_WIDTH * TAMAGO_LCD_HEIGHT bytes.
 void tamago_get_display(uint8_t *out);
 
+// Number of status icons surrounding the main display. Layout (matching
+// asterick/tamago):
+//   Top row:    0 dashboard, 1 food,    2 trash,  3 globe, 4 user
+//   Bottom row: 5 comments,  6 medkit,  7 heart,  8 book,  9 bell
+#define TAMAGO_ICON_COUNT  10
+
+// Read the 10 status icon values into `out` (length TAMAGO_ICON_COUNT).
+// Each byte is a 2-bit intensity (0 = off, 1..3 = visible grayscale).
+void tamago_get_icons(uint8_t *out);
+
 // Set the button state. `mask` is a bitmask of TAMAGO_BTN_* constants.
 // Bits set = button pressed.
 void tamago_set_buttons(uint8_t mask);

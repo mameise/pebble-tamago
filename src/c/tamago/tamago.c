@@ -171,6 +171,28 @@ void tamago_get_display(uint8_t *out)
   }
 }
 
+// Icon extraction matches the refresh_simple loop in tamago/main.js:
+//   var a=4, b=0, g=0;
+//   while (g<10) { glyph = (dram[a] >> b) & 3; if ((b-=2)<0){b=6;a++;} ... }
+//
+// Walking the loop manually gives the table below. Two bits per icon,
+// four icons per byte, 10 icons total across 4 bytes (DRAM[4..7]) — but
+// only the first 2 bits of DRAM[4] and first 2 bits of DRAM[7] are used.
+void tamago_get_icons(uint8_t *out)
+{
+  if (!g_initialised || !out) return;
+  out[0] = (g_dram[4] >> 0) & 0x3;   // dashboard
+  out[1] = (g_dram[5] >> 6) & 0x3;   // food
+  out[2] = (g_dram[5] >> 4) & 0x3;   // trash
+  out[3] = (g_dram[5] >> 2) & 0x3;   // globe
+  out[4] = (g_dram[5] >> 0) & 0x3;   // user
+  out[5] = (g_dram[6] >> 6) & 0x3;   // comments
+  out[6] = (g_dram[6] >> 4) & 0x3;   // medkit
+  out[7] = (g_dram[6] >> 2) & 0x3;   // heart
+  out[8] = (g_dram[6] >> 0) & 0x3;   // book
+  out[9] = (g_dram[7] >> 6) & 0x3;   // bell
+}
+
 // ----- Buttons ------------------------------------------------------------
 
 void tamago_set_buttons(uint8_t mask)
