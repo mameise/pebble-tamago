@@ -28,17 +28,19 @@ typedef struct {
   uint8_t  p;
 } cpu6502_t;
 
+// Small frequently-accessed state kept as globals (compile-time addresses).
 extern cpu6502_t g_cpu;
-
-// Memory regions — globals so the compiler can resolve addresses at
-// compile time.
 extern uint8_t g_wram[TAMAGO_WRAM_SIZE];
 extern uint8_t g_dram[TAMAGO_DRAM_SIZE];
 extern uint8_t g_cpureg[TAMAGO_CPUREG_SIZE];
 
-// ROM bank cache + static ROM are also globals.
-extern uint8_t g_rom_bank_buf[TAMAGO_ROM_BANK_SIZE];
-extern uint8_t g_static_rom[TAMAGO_STATIC_ROM_SIZE];
+// Large buffers are heap-allocated to keep .bss under the Pebble's
+// 16-bit virtual-size limit (65535 bytes). They're only ever touched
+// through the page table after init, so a heap pointer costs the same
+// as a global array: page_table[p] already holds the absolute address
+// either way.
+extern uint8_t *g_rom_bank_buf;
+extern uint8_t *g_static_rom;
 
 // IRQ vector table (16 entries, loaded once at init).
 extern uint16_t g_irq_vectors[16];

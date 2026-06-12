@@ -17,8 +17,8 @@ cpu6502_t g_cpu;
 uint8_t   g_wram[TAMAGO_WRAM_SIZE];
 uint8_t   g_dram[TAMAGO_DRAM_SIZE];
 uint8_t   g_cpureg[TAMAGO_CPUREG_SIZE];
-uint8_t   g_rom_bank_buf[TAMAGO_ROM_BANK_SIZE];
-uint8_t   g_static_rom[TAMAGO_STATIC_ROM_SIZE];
+uint8_t  *g_rom_bank_buf = NULL;   // malloc'd in tamago_init
+uint8_t  *g_static_rom   = NULL;   // malloc'd in tamago_init
 uint16_t  g_irq_vectors[16];
 uint8_t   g_irq_pending_any;
 uint8_t   g_rom_bank_id;
@@ -35,10 +35,27 @@ bool tamago_init(void)
     APP_LOG(APP_LOG_LEVEL_WARNING, "tamago_init: already initialised");
     return true;
   }
+
+  // Allocate the big ROM caches on the heap. They have to live somewhere
+  // and putting them in .bss pushes us over Pebble's 16-bit virtual-size
+  // limit (65535 bytes). The heap on Emery has plenty of room.
+  g_rom_bank_buf = (uint8_t *)malloc(TAMAGO_ROM_BANK_SIZE);
+  g_static_rom   = (uint8_t *)malloc(TAMAGO_STATIC_ROM_SIZE);
+  if (!g_rom_bank_buf || !g_static_rom) {
+    APP_LOG(APP_LOG_LEVEL_ERROR,
+            "tamago_init: out of memory (bank=%p static=%p)",
+            g_rom_bank_buf, g_static_rom);
+    if (g_rom_bank_buf) { free(g_rom_bank_buf); g_rom_bank_buf = NULL; }
+    if (g_static_rom)   { free(g_static_rom);   g_static_rom   = NULL; }
+    return false;
+  }
+
   memset(&g_cpu, 0, sizeof(g_cpu));
   memset(g_wram, 0, sizeof(g_wram));
   memset(g_dram, 0, sizeof(g_dram));
   memset(g_cpureg, 0, sizeof(g_cpureg));
+  memset(g_rom_bank_buf, 0, TAMAGO_ROM_BANK_SIZE);
+  memset(g_static_rom,   0, TAMAGO_STATIC_ROM_SIZE);
   g_keys = 0xFF;
   g_rom_bank_id = 0xFF;
   g_rom_loaded = false;
@@ -55,6 +72,8 @@ bool tamago_init(void)
 
 void tamago_release(void)
 {
+  if (g_rom_bank_buf) { free(g_rom_bank_buf); g_rom_bank_buf = NULL; }
+  if (g_static_rom)   { free(g_static_rom);   g_static_rom   = NULL; }
   g_initialised = false;
 }
 
