@@ -1,12 +1,14 @@
 {
   "name": "tamago-pebble",
   "author": "Bernd",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "keywords": [
     "pebble-app"
   ],
   "private": true,
-  "dependencies": {},
+  "dependencies": {
+    "@rebble/clay": "^1.0.4"
+  },
   "pebble": {
     "displayName": "TamaGo",
     "uuid": "8c5f3a1e-d472-4b09-9a3e-2e8c64f9b3a1",
@@ -18,6 +20,12 @@
     "watchapp": {
       "watchface": false
     },
+    "messageKeys": [
+      "VibrationEnabled",
+      "TamaFrameEnabled",
+      "TamaFrameColor",
+      "TamaPixelColor"
+    ],
     "resources": {
       "media": [
         {
