@@ -482,16 +482,6 @@ static void step_tick(void *data)
             (unsigned long)step_ms);
   }
 
-  // I/O register write counter dump every ~5 seconds — temporary, for
-  // SPU (sound) register reverse-engineering. Shows which $30xx
-  // addresses the firmware writes to. When bell rings, expect a burst
-  // of writes to the sound channel registers.
-  static uint32_t io_dump_ctr = 0;
-  if (++io_dump_ctr >= EMU_FPS * 5) {
-    io_dump_ctr = 0;
-    tamago_io_dump_counters();
-  }
-
   // Render every 2nd frame (10 fps display).
   static uint8_t render_skip = 0;
   if ((++render_skip & 1) == 0) {
