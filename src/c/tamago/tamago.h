@@ -130,4 +130,22 @@ bool tamago_deserialize_state(const uint8_t *buf, uint32_t bufsize);
 uint8_t tamago_ram_read(uint16_t addr);
 void    tamago_ram_write(uint16_t addr, uint8_t val);
 
+// Profiling — snapshot + reset the hot-path counters. Used by main.c
+// to print a per-minute profile of where emulator time is going.
+// Returns the snapshot via out-params. Pass NULL to skip retrieval.
+typedef struct {
+  uint32_t opcodes;
+  uint32_t reads_fast;
+  uint32_t reads_io;
+  uint32_t writes_fast;
+  uint32_t writes_io;
+  uint32_t writes_dropped;
+  uint32_t irqs;
+  uint32_t nmis;
+  uint32_t irq_entries;
+  uint32_t nmi_entries;
+} tamago_profile_snapshot_t;
+
+void tamago_profile_snapshot_and_reset(tamago_profile_snapshot_t *out);
+
 #endif // TAMAGO_H

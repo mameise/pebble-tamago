@@ -78,7 +78,8 @@ void    tamago_io_write(uint16_t addr, uint8_t value);
 TAMAGO_INLINE uint8_t tamago_read(uint16_t addr)
 {
   uint8_t *page = tamago_read_page[addr >> 8];
-  if (page) return page[addr & 0xFF];
+  if (page) { g_tamago_profile.reads_fast++; return page[addr & 0xFF]; }
+  g_tamago_profile.reads_io++;
   return tamago_io_read(addr);
 }
 
@@ -92,8 +93,9 @@ TAMAGO_INLINE uint16_t tamago_read16(uint16_t addr)
 TAMAGO_INLINE void tamago_write(uint16_t addr, uint8_t value)
 {
   uint8_t *page = tamago_write_page[addr >> 8];
-  if (page) { page[addr & 0xFF] = value; return; }
-  if ((addr >> 12) == 0x3) tamago_io_write(addr, value);
+  if (page) { g_tamago_profile.writes_fast++; page[addr & 0xFF] = value; return; }
+  if ((addr >> 12) == 0x3) { g_tamago_profile.writes_io++; tamago_io_write(addr, value); return; }
+  g_tamago_profile.writes_dropped++;
 }
 
 // ROM banking
@@ -109,5 +111,24 @@ void    tamago_cpu_irq(void);
 // IRQ logic (defined in tamago_memory.c since it touches cpureg)
 void tamago_fire_irq(uint8_t i);
 void tamago_fire_nmi(uint8_t i);
+
+// ----- Profiling counters --------------------------------------------------
+//
+// Bumped from the hot path. Cost per increment is one load + add + store
+// (small but nonzero). Toggle TAMAGO_PROFILE = 0 in tamago.c to disable.
+typedef struct {
+  uint32_t opcodes;        // tamago_cpu_step calls
+  uint32_t reads_fast;     // hit page-table (WRAM/DRAM/ROM)
+  uint32_t reads_io;       // missed → tamago_io_read
+  uint32_t writes_fast;    // hit page-table
+  uint32_t writes_io;      // hit I/O area
+  uint32_t writes_dropped; // hit ROM (silently ignored)
+  uint32_t irqs;           // tamago_fire_irq calls
+  uint32_t nmis;           // tamago_fire_nmi calls
+  uint32_t irq_entries;    // actual CPU IRQ entries (after mask check)
+  uint32_t nmi_entries;    // actual CPU NMI entries
+} tamago_profile_t;
+
+extern tamago_profile_t g_tamago_profile;
 
 #endif // TAMAGO_INTERNAL_H

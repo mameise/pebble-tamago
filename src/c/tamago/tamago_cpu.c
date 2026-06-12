@@ -146,6 +146,7 @@ void tamago_cpu_reset(void)
 
 void tamago_cpu_nmi(void)
 {
+  g_tamago_profile.nmi_entries++;
   push(CPU.pc >> 8);
   push(CPU.pc & 0xFF);
   push(pack_p());
@@ -168,6 +169,7 @@ static void cpu_irq_internal(bool brk)
 
 void tamago_cpu_irq(void)
 {
+  g_tamago_profile.irq_entries++;
   // Hardware IRQ: look up the highest-priority pending bit in
   // cpureg[$73:$74] (16-bit) and jump to the corresponding vector.
   // The vector indices are 0..15; index 0 is highest priority.
@@ -489,6 +491,7 @@ uint8_t tamago_cpu_step(void) __attribute__((hot));
 
 uint8_t tamago_cpu_step(void)
 {
+  g_tamago_profile.opcodes++;
   // Fire pending IRQs before fetching the next instruction.
   // Fast path: a single byte cache flag, updated by tamago_fire_irq and
   // io_write_int_flag. Avoids reading cpureg[$73:$74] on every step.

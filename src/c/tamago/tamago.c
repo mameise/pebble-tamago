@@ -18,6 +18,11 @@ cpu6502_t g_cpu;
 uint8_t   g_wram[TAMAGO_WRAM_SIZE];
 uint8_t   g_dram[TAMAGO_DRAM_SIZE];
 uint8_t   g_cpureg[TAMAGO_CPUREG_SIZE];
+
+// Profiling counters — see tamago_internal.h. Plain global to let the
+// linker resolve direct addresses (one less indirection vs a struct
+// member access through a pointer).
+tamago_profile_t g_tamago_profile;
 uint8_t  *g_rom_bank_buf = NULL;   // malloc'd in tamago_init
 uint8_t  *g_static_rom   = NULL;   // malloc'd in tamago_init
 uint16_t  g_irq_vectors[16];
@@ -291,4 +296,21 @@ bool tamago_deserialize_state(const uint8_t *buf, uint32_t bufsize)
   g_keys = *p++;
   tamago_set_rom_bank(saved_bank);
   return true;
+}
+
+void tamago_profile_snapshot_and_reset(tamago_profile_snapshot_t *out)
+{
+  if (out) {
+    out->opcodes        = g_tamago_profile.opcodes;
+    out->reads_fast     = g_tamago_profile.reads_fast;
+    out->reads_io       = g_tamago_profile.reads_io;
+    out->writes_fast    = g_tamago_profile.writes_fast;
+    out->writes_io      = g_tamago_profile.writes_io;
+    out->writes_dropped = g_tamago_profile.writes_dropped;
+    out->irqs           = g_tamago_profile.irqs;
+    out->nmis           = g_tamago_profile.nmis;
+    out->irq_entries    = g_tamago_profile.irq_entries;
+    out->nmi_entries    = g_tamago_profile.nmi_entries;
+  }
+  memset(&g_tamago_profile, 0, sizeof(g_tamago_profile));
 }

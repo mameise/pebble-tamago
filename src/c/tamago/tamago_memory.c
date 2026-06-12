@@ -240,6 +240,7 @@ void tamago_io_write(uint16_t addr, uint8_t value)
 
 void tamago_fire_irq(uint8_t i)
 {
+  g_tamago_profile.irqs++;
   uint16_t mask = (g_cpureg[0x70] << 8) | g_cpureg[0x71];
   if (!((0x8000 >> i) & mask)) return;
   g_cpureg[0x73 + (i >> 3)] |= 0x80 >> (i & 7);
@@ -249,6 +250,7 @@ void tamago_fire_irq(uint8_t i)
 
 void tamago_fire_nmi(uint8_t i)
 {
+  g_tamago_profile.nmis++;
   if (~g_cpureg[0x76] & (0x80 >> i)) return;
   tamago_cpu_nmi();
 }
