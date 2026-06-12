@@ -130,51 +130,70 @@ static GColor s_palette[4];
 // initialised in load_settings() and updated via AppMessage.
 
 // ----- Status icon bitmaps (12×12, MSB-first per row) ----
+//
+// These mirror the actual Tama-Go LCD menu icons (Information, Food,
+// Toilet, Doors, Training, IR, Medicine, Gotchi Figure, Album, Attention)
+// based on the Bandai Quick Start Guide labels and TamaTalk forum
+// descriptions. Pixel art is approximate — the real LCD uses fixed
+// segments, we render onto a 12×12 grid.
 
-static const uint16_t icon_dashboard[12] = {
-  0x000, 0x000, 0x000, 0x7FE, 0x000, 0x7FE,
-  0x000, 0x7FE, 0x000, 0x000, 0x000, 0x000,
+static const uint16_t icon_status[12] = {
+  // small character face — Information / status menu
+  0x000, 0x1F8, 0x204, 0x50A, 0x402, 0x402,
+  0x4F2, 0x402, 0x204, 0x1F8, 0x000, 0x000,
 };
 static const uint16_t icon_food[12] = {
-  0x000, 0x6D8, 0x6D8, 0x6D8, 0x248, 0x3F0,
-  0x0C0, 0x0C0, 0x0C0, 0x0C0, 0x0C0, 0x000,
+  // chef hat — feeding menu
+  0x000, 0x1F8, 0x3FC, 0x7FE, 0x7FE, 0x7FE,
+  0x3FC, 0x3FC, 0x3FC, 0x3FC, 0x000, 0x000,
 };
-static const uint16_t icon_trash[12] = {
-  0x000, 0x1F8, 0x0F0, 0x7FE, 0x7FE, 0x2D0,
-  0x2D0, 0x2D0, 0x2D0, 0x2D0, 0x1F8, 0x000,
+static const uint16_t icon_toilet[12] = {
+  // toilet bowl with seat — cleanup
+  0x000, 0x000, 0x7FE, 0x402, 0x3FC, 0x204,
+  0x204, 0x204, 0x1F8, 0x108, 0x1F8, 0x000,
 };
-static const uint16_t icon_globe[12] = {
-  0x000, 0x0F0, 0x1F8, 0x36C, 0x7FE, 0x3FC,
-  0x3FC, 0x7FE, 0x36C, 0x1F8, 0x0F0, 0x000,
+static const uint16_t icon_door[12] = {
+  // door with handle — Doors menu (go outside)
+  0x000, 0x7FE, 0x606, 0x606, 0x606, 0x606,
+  0x61E, 0x606, 0x606, 0x606, 0x7FE, 0x000,
 };
-static const uint16_t icon_user[12] = {
-  0x000, 0x060, 0x0F0, 0x0F0, 0x060, 0x000,
-  0x1F8, 0x3FC, 0x36C, 0x36C, 0x000, 0x000,
+static const uint16_t icon_training[12] = {
+  // X mark — Training / Time-Out
+  0x000, 0x402, 0x606, 0x30C, 0x198, 0x0F0,
+  0x0F0, 0x198, 0x30C, 0x606, 0x402, 0x000,
 };
-static const uint16_t icon_comments[12] = {
-  0x000, 0x7F8, 0x618, 0x618, 0x618, 0x7F8,
-  0x600, 0x600, 0x000, 0x000, 0x000, 0x000,
+static const uint16_t icon_ir[12] = {
+  // two arrows pointing inward — IR communication
+  0x000, 0x000, 0x108, 0x30C, 0x70E, 0xF0F,
+  0x70E, 0x30C, 0x108, 0x000, 0x000, 0x000,
 };
-static const uint16_t icon_medkit[12] = {
-  0x000, 0x0F0, 0x0F0, 0x0F0, 0x7FE, 0x7FE,
-  0x7FE, 0x0F0, 0x0F0, 0x0F0, 0x000, 0x000,
+static const uint16_t icon_medicine[12] = {
+  // diagonal syringe — Medicine
+  0x000, 0x006, 0x00E, 0x01C, 0x038, 0x1F0,
+  0x3E0, 0x780, 0xE00, 0xC00, 0x400, 0x000,
 };
 static const uint16_t icon_heart[12] = {
-  0x000, 0x30C, 0x79E, 0x7FE, 0x7FE, 0x3FC,
-  0x3FC, 0x1F8, 0x0F0, 0x060, 0x000, 0x000,
+  // heart — Gotchi Figure / friend
+  0x000, 0x000, 0x30C, 0x79E, 0x7FE, 0x7FE,
+  0x7FE, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x000,
 };
 static const uint16_t icon_book[12] = {
-  0x000, 0x7FE, 0x6FC, 0x6FC, 0x6FC, 0x6FC,
-  0x6FC, 0x6FC, 0x6FC, 0x7FE, 0x000, 0x000,
+  // book with pages — Album / Friends list
+  0x000, 0x7FE, 0x4F2, 0x402, 0x4F2, 0x402,
+  0x4F2, 0x402, 0x4F2, 0x402, 0x7FE, 0x000,
 };
 static const uint16_t icon_bell[12] = {
-  0x000, 0x060, 0x0F0, 0x1F8, 0x3FC, 0x3FC,
-  0x7FE, 0x7FE, 0x7FE, 0x000, 0x0F0, 0x000,
+  // bell with clapper — Attention indicator
+  0x000, 0x060, 0x0F0, 0x1F8, 0x1F8, 0x3FC,
+  0x3FC, 0x7FE, 0x7FE, 0xFFF, 0x060, 0x0F0,
 };
 
+// Pointer table in DRAM-bit order:
+// Top row    (DRAM[4] bit 0-1 + DRAM[5] bits): status, food, toilet, door, training
+// Bottom row (DRAM[6] bits + DRAM[7] bit 6-7):  ir, medicine, heart, book, bell
 static const uint16_t *s_icon_bitmaps[TAMAGO_ICON_COUNT] = {
-  icon_dashboard, icon_food, icon_trash,   icon_globe,  icon_user,
-  icon_comments,  icon_medkit, icon_heart, icon_book,   icon_bell,
+  icon_status, icon_food,     icon_toilet, icon_door, icon_training,
+  icon_ir,     icon_medicine, icon_heart,  icon_book, icon_bell,
 };
 
 // ----- Hour-marker positions (12 markers around the perimeter) ----
@@ -497,9 +516,9 @@ static void step_tick(void *data)
     tamago_eeprom_flush();
   }
 
-  // Debug log every ~3 seconds.
+  // Debug log every ~60 seconds.
   static uint32_t dbg_ctr = 0;
-  if (++dbg_ctr >= EMU_FPS * 3) {
+  if (++dbg_ctr >= EMU_FPS * 60) {
     dbg_ctr = 0;
     uint16_t pc; uint8_t a, x, y, s, bank;
     tamago_debug_get_state(&pc, &a, &x, &y, &s, &bank);
@@ -1055,6 +1074,18 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
             (unsigned long)hex);
   }
 
+  // Reset Tama if the user toggled it on. Wipes EEPROM + resets the CPU
+  // so the Tama firmware boots from a blank slate (first-time setup
+  // screen / egg select). The toggle itself isn't persisted — it only
+  // takes effect for the current save cycle, then resets to OFF in Clay
+  // memory (because we never write it back).
+  t = dict_find(iter, MESSAGE_KEY_ResetTama);
+  if (t && t->value->int8 != 0) {
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: ResetTama -> wiping state");
+    tamago_eeprom_wipe();
+    tamago_reset();
+  }
+
   if (changed_palette) {
     update_palette_from_color(s_tama_pixel_color);
   }
@@ -1075,18 +1106,32 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
 
 // ----- App init / deinit ----
 
-// Periodic RTC sync — currently 60 seconds for testing. Once verified
-// stable, can be raised to 15 minutes. Boot phase may overwrite our
-// initial write at $cc00; this short interval catches that quickly.
-#define RTC_SYNC_INTERVAL_MS  (60 * 1000)
+// Periodic RTC sync — adaptive interval. The Tama firmware overwrites
+// our initial-sync write during its boot (settles to 09:00:00 default).
+// So the first periodic check needs to fire quickly to catch that and
+// re-sync. After we've seen a small drift once, the clock is stable
+// and we can fall back to 15 minutes.
+#define RTC_SYNC_INTERVAL_FAST_MS  (60 * 1000)        // first checks
+#define RTC_SYNC_INTERVAL_SLOW_MS  (15 * 60 * 1000)   // after we settle
 static AppTimer *s_rtc_sync_timer;
+static bool      s_rtc_settled = false;   // true once drift was small once
 
 static void rtc_sync_tick(void *data)
 {
   s_rtc_sync_timer = NULL;
   if (!s_running) return;
-  tamago_rtc_periodic_check();
-  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS, rtc_sync_tick, NULL);
+  int32_t abs_drift = tamago_rtc_periodic_check();
+  // Once we've seen drift stay within the small-drift band, switch to
+  // the slow interval. If we ever see a big drift again (e.g. user
+  // pressed Reset), we fall back to fast checks.
+  if (abs_drift <= TAMAGO_RTC_DRIFT_THRESHOLD_S) {
+    s_rtc_settled = true;
+  } else {
+    s_rtc_settled = false;
+  }
+  uint32_t next_ms = s_rtc_settled ? RTC_SYNC_INTERVAL_SLOW_MS
+                                   : RTC_SYNC_INTERVAL_FAST_MS;
+  s_rtc_sync_timer = app_timer_register(next_ms, rtc_sync_tick, NULL);
 }
 
 static void app_init(void)
@@ -1123,7 +1168,9 @@ static void app_init(void)
 
   s_running = true;
   s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
-  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS, rtc_sync_tick, NULL);
+  // First RTC check uses the fast interval to catch the boot-clobber.
+  s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_FAST_MS,
+                                        rtc_sync_tick, NULL);
 }
 
 static void app_deinit(void)
