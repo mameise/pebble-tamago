@@ -194,12 +194,13 @@ static void step_tick(void *data)
 
   // Adaptive frame pacing: aim for one frame every EMU_FRAME_MS ms of
   // wall-clock time. If step_cycles already ate the whole budget (or
-  // more), fire the next tick almost immediately (1 ms minimum). This
-  // avoids wasting the 50 ms timer delay when we're behind, which is
-  // what was making the Tama clock run at half speed.
+  // more), fire the next tick after a small delay (not 0/1 ms!) so the
+  // OS scheduler still gets time for housekeeping — especially the
+  // backlight controller. Running with delay=1 starves the system and
+  // makes the backlight flicker on every button press.
   uint32_t next_delay;
-  if (step_ms >= EMU_FRAME_MS) {
-    next_delay = 1;
+  if (step_ms + 5 >= EMU_FRAME_MS) {
+    next_delay = 5;  // already late, but never less than 5 ms
   } else {
     next_delay = EMU_FRAME_MS - step_ms;
   }
@@ -215,11 +216,16 @@ static uint8_t s_button_mask = 0;
 
 static void buttons_apply(void) { tamago_set_buttons(s_button_mask); }
 
-static void btn_a_press(ClickRecognizerRef r, void *ctx)   { s_button_mask |=  TAMAGO_BTN_A; buttons_apply(); }
+// Tell the OS to keep the backlight on while the user is interacting.
+// Without this, our tight emulation loop can starve the system's
+// backlight subsystem and the light flickers off after each press.
+static void poke_backlight(void) { light_enable_interaction(); }
+
+static void btn_a_press(ClickRecognizerRef r, void *ctx)   { s_button_mask |=  TAMAGO_BTN_A; buttons_apply(); poke_backlight(); }
 static void btn_a_release(ClickRecognizerRef r, void *ctx) { s_button_mask &= ~TAMAGO_BTN_A; buttons_apply(); }
-static void btn_b_press(ClickRecognizerRef r, void *ctx)   { s_button_mask |=  TAMAGO_BTN_B; buttons_apply(); }
+static void btn_b_press(ClickRecognizerRef r, void *ctx)   { s_button_mask |=  TAMAGO_BTN_B; buttons_apply(); poke_backlight(); }
 static void btn_b_release(ClickRecognizerRef r, void *ctx) { s_button_mask &= ~TAMAGO_BTN_B; buttons_apply(); }
-static void btn_c_press(ClickRecognizerRef r, void *ctx)   { s_button_mask |=  TAMAGO_BTN_C; buttons_apply(); }
+static void btn_c_press(ClickRecognizerRef r, void *ctx)   { s_button_mask |=  TAMAGO_BTN_C; buttons_apply(); poke_backlight(); }
 static void btn_c_release(ClickRecognizerRef r, void *ctx) { s_button_mask &= ~TAMAGO_BTN_C; buttons_apply(); }
 
 static void click_config_provider(void *context)
