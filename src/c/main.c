@@ -13,6 +13,7 @@
 
 #include <pebble.h>
 #include "tamago/tamago.h"
+#include "tamago/tamago_eeprom.h"
 
 // ----- Configuration ----
 
@@ -180,6 +181,16 @@ static void step_tick(void *data)
     bucket_cycles  = 0;
     bucket_step_ms = 0;
     bucket_wall_ms = 0;
+  }
+
+  // Periodic EEPROM flush every 60 seconds. The EEPROM also flushes
+  // automatically on each I²C STOP-after-WRITE, but this catches the
+  // case where the watch loses power mid-write or the user force-quits
+  // the app. Keeps lost progress to under a minute in the worst case.
+  static uint32_t flush_ctr = 0;
+  if (++flush_ctr >= EMU_FPS * 60) {
+    flush_ctr = 0;
+    tamago_eeprom_flush();
   }
 
   // Redraw the tama layer — but only every 2nd frame (effective 10 fps
