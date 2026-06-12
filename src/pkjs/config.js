@@ -180,6 +180,40 @@ module.exports = [
     "items": [
       {
         "type": "heading",
+        "defaultValue": "Time & Date"
+      },
+      {
+        "type": "select",
+        "messageKey": "TimeFormat",
+        "label": "Time format",
+        "description": "How the digital time is displayed.",
+        "defaultValue": "0",
+        "options": [
+          { "label": "System default", "value": "0" },
+          { "label": "24-hour (14:30)", "value": "1" },
+          { "label": "12-hour (2:30)",  "value": "2" }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "DateFormat",
+        "label": "Date format",
+        "description": "How the date is displayed.",
+        "defaultValue": "0",
+        "options": [
+          { "label": "European (Fri 12 Jun)", "value": "0" },
+          { "label": "American (Fri Jun 12)", "value": "1" },
+          { "label": "ISO (2026-06-12)",      "value": "2" }
+        ]
+      }
+    ]
+  },
+
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
         "defaultValue": "Reset"
       },
       {
