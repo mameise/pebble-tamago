@@ -182,10 +182,13 @@ static const marker_pos_t MARKER_POSITIONS[12] = {
   /* 11 (11) */ {  42,  10 },
 };
 
-static const char *const ARABIC_NUMERALS[12] = {
+// Both arrays are present even though only one is referenced at build
+// time — once the Clay settings page lands, marker style switches at
+// runtime and both are needed. Mark unused so -Werror is happy for now.
+static const char *const ARABIC_NUMERALS[12] __attribute__((unused)) = {
   "12", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
 };
-static const char *const ROMAN_NUMERALS[12] = {
+static const char *const ROMAN_NUMERALS[12] __attribute__((unused)) = {
   "XII", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI",
 };
 
@@ -241,14 +244,6 @@ static void bg_update_proc(Layer *layer, GContext *ctx)
 }
 
 // ----- Tama device frame (dynamic white panel) ----
-
-static bool any_icon_lit(void)
-{
-  for (int i = 0; i < TAMAGO_ICON_COUNT; i++) {
-    if (s_icons[i]) return true;
-  }
-  return false;
-}
 
 // Layer covers the whole window so the rect we draw inside is in absolute
 // window coordinates. The rect's size depends on which icon rows have lit
