@@ -5,6 +5,22 @@ TamaTown Tama-Go (Tamagotchi V7) emulator — to Pebble.
 
 Target: Pebble Time 2 (Emery platform).
 
+## ⚠️ ROM required
+
+This repository ships with a **dummy** `resources/data/tamago.bin` that
+boots into a static checkerboard pattern so the project builds and runs
+out of the box. The real Tama-Go ROM is copyrighted and not
+redistributable — you must dump it yourself or otherwise obtain it
+legally, then replace the dummy file at:
+
+```
+resources/data/tamago.bin       (must be exactly 655360 bytes / 640 KB)
+```
+
+If you see a static striped pattern when you launch the watchface
+instead of an egg / room / Tamagotchi character, the dummy ROM is
+still loaded.
+
 ## Status
 
 Early proof-of-concept. The 6502 CPU core, memory map, ROM banking, and
@@ -22,6 +38,9 @@ See [HOW_TO_BUILD.md](HOW_TO_BUILD.md) for build + debugging notes.
 ```
 https://cloudpebble.repebble.com/ide/import/github/<your-username>/tamago-pebble/
 ```
+
+After importing, replace `resources/data/tamago.bin` with your own ROM
+dump before flashing — otherwise you'll just see the dummy pattern.
 
 ## Hardware specs (TamaTown Tama-Go, V7, 2010)
 
@@ -61,4 +80,6 @@ tamago-pebble/
 ## License
 
 Code: same license as the upstream emulator (see asterick/tamago).
-ROM: not redistributable; the included `tamago.bin` is for personal use.
+ROM: not redistributable. The `tamago.bin` shipped in this repository
+is a dummy file with a minimal boot stub — replace it with your own
+dump of the real Tama-Go ROM to use the emulator.
