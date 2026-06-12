@@ -36,11 +36,11 @@ void tamago_rtc_initial_sync(void)
           h, m, s);
 }
 
-void tamago_rtc_periodic_check(void)
+int32_t tamago_rtc_periodic_check(void)
 {
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
-  if (!t) return;
+  if (!t) return 0;
 
   uint8_t th = tamago_ram_read(TAMAGO_RTC_HOURS);
   uint8_t tm = tamago_ram_read(TAMAGO_RTC_MINUTES);
@@ -54,7 +54,7 @@ void tamago_rtc_periodic_check(void)
             "rtc_sync: garbage in tama clock (%02x:%02x:%02x), forcing resync",
             th, tm, ts);
     write_pebble_time_to_tama(t);
-    return;
+    return 0;
   }
 
   // Compute drift in seconds. We consider a same-day window — if the
@@ -67,11 +67,12 @@ void tamago_rtc_periodic_check(void)
   if (drift < -43200) drift += 86400;
   int32_t abs_drift = drift < 0 ? -drift : drift;
 
-  APP_LOG(APP_LOG_LEVEL_INFO,
-          "rtc_sync: tama=%02d:%02d:%02d real=%02d:%02d:%02d drift=%lds",
-          th, tm, ts, t->tm_hour, t->tm_min, t->tm_sec, (long)drift);
-
   if (abs_drift > TAMAGO_RTC_DRIFT_THRESHOLD_S) {
+    APP_LOG(APP_LOG_LEVEL_INFO,
+            "rtc_sync: tama=%02d:%02d:%02d real=%02d:%02d:%02d drift=%lds (resync)",
+            th, tm, ts, t->tm_hour, t->tm_min, t->tm_sec, (long)drift);
     write_pebble_time_to_tama(t);
   }
+  // (drift within threshold → no log, no resync)
+  return abs_drift;
 }

@@ -50,7 +50,8 @@ void tamago_rtc_initial_sync(void);
 
 // Periodic check: read back the Tama's clock and compare to the Pebble
 // wall clock. Resync if drift exceeds TAMAGO_RTC_DRIFT_THRESHOLD_S. Call
-// every ~15 minutes from an AppTimer.
-void tamago_rtc_periodic_check(void);
+// every ~15 minutes from an AppTimer. Returns the absolute drift in
+// seconds before correction (0 if a forced resync due to bad data).
+int32_t tamago_rtc_periodic_check(void);
 
 #endif // TAMAGO_RTC_SYNC_H

@@ -38,6 +38,10 @@ void tamago_eeprom_init(void);
 // optionally periodically.
 void tamago_eeprom_flush(void);
 
+// Wipe the entire EEPROM (in-memory and persist storage). The Tama
+// firmware will boot into its first-time setup flow on the next start.
+void tamago_eeprom_wipe(void);
+
 // Update the bus state. Equivalent to JS's eeprom.update(power, clk, data).
 // power, clk, data are 0/non-zero (booleans).
 void tamago_eeprom_update(uint8_t power, uint8_t clk, uint8_t data);

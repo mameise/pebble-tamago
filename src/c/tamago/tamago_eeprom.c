@@ -112,6 +112,21 @@ void tamago_eeprom_flush(void)
   }
 }
 
+void tamago_eeprom_wipe(void)
+{
+  // Clear all 4 KB of EEPROM in-memory + delete all persisted pages.
+  // The Tama firmware will see "blank" EEPROM on the next boot and
+  // start fresh (egg-select screen).
+  memset(s_data, 0, sizeof(s_data));
+  s_dirty = 0;
+  for (int p = 0; p < EEPROM_PAGE_COUNT; p++) {
+    uint32_t key = EEPROM_PERSIST_BASE + p;
+    persist_delete(key);
+  }
+  APP_LOG(APP_LOG_LEVEL_INFO,
+          "tamago_eeprom: wiped (in-memory + persist)");
+}
+
 uint8_t tamago_eeprom_output(void)
 {
   return s_output;
