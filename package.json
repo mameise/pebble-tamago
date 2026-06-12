@@ -24,7 +24,10 @@
       "VibrationEnabled",
       "TamaFrameEnabled",
       "TamaFrameColor",
-      "TamaPixelColor"
+      "TamaPixelColor",
+      "BgFillColor",
+      "BgMarkersColor",
+      "BgMarkersStyle"
     ],
     "resources": {
       "media": [
