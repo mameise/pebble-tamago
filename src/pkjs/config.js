@@ -176,6 +176,27 @@ module.exports = [
   },
 
   {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Reset"
+      },
+      {
+        "type": "text",
+        "defaultValue": "Toggle this ON and hit <b>Save</b> to wipe the Tama's EEPROM and start fresh with a new egg. The toggle resets to OFF automatically after the wipe — flip it again the next time you want to reset."
+      },
+      {
+        "type": "toggle",
+        "messageKey": "ResetTama",
+        "label": "Reset Tamagotchi",
+        "description": "Wipes the saved Tama state. You'll start with a fresh egg next time the app launches.",
+        "defaultValue": false
+      }
+    ]
+  },
+
+  {
     "type": "submit",
     "defaultValue": "Save Settings"
   }
