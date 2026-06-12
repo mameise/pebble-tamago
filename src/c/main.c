@@ -629,8 +629,10 @@ static void init_palette(void)
 #endif
 }
 
-// Periodic RTC sync — runs every 15 minutes via app_timer.
-#define RTC_SYNC_INTERVAL_MS  (15 * 60 * 1000)
+// Periodic RTC sync — currently 60 seconds for testing. Once verified
+// stable, can be raised to 15 minutes. Boot phase may overwrite our
+// initial write at $cc00; this short interval catches that quickly.
+#define RTC_SYNC_INTERVAL_MS  (60 * 1000)
 static AppTimer *s_rtc_sync_timer;
 
 static void rtc_sync_tick(void *data)
