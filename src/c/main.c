@@ -29,21 +29,23 @@
 #define EMU_FRAME_MS          (1000 / EMU_FPS)
 #define EMU_CYCLES_PER_FRAME  (TAMAGO_CLOCK_RATE / EMU_FPS)
 
-// ----- Tama LCD layout (1.5× non-integer scale) ----
+// ----- Tama LCD layout (1.75× non-integer scale) ----
 //
 // Source: 48×31 (TAMAGO_LCD_WIDTH × TAMAGO_LCD_HEIGHT)
-// Dest:   72×46
+// Dest:   84×54  (48×7/4, 31×7/4 rounded)
 //
-// Non-integer scaling is done per-pixel using an integer mapping. Each
-// source pixel covers either 1 or 2 destination pixels depending on
-// rounding. The pattern is close to (2,1,2,1,...) → visually uniform.
+// 1.75× = 7/4, so every 4 source pixels expand to 7 destination pixels.
+// The integer mapping gives a pattern of block widths (1,2,2,2) repeating,
+// which reads as a slightly uneven but mostly uniform stretch — better
+// than 1.5× (pattern 2,1) for text rendered inside the Tama display.
+// For perfectly uniform pixels you'd need 2× (= 96×62).
 
-#define TAMA_DRAW_W           72
-#define TAMA_DRAW_H           46
-#define TAMA_LCD_X            ((200 - TAMA_DRAW_W) / 2)        // 64
+#define TAMA_DRAW_W           84
+#define TAMA_DRAW_H           54
+#define TAMA_LCD_X            ((200 - TAMA_DRAW_W) / 2)        // 58
 #define TAMA_LCD_Y            140
-#define TAMA_LCD_X_RIGHT      (TAMA_LCD_X + TAMA_DRAW_W)        // 136
-#define TAMA_LCD_Y_BOTTOM     (TAMA_LCD_Y + TAMA_DRAW_H)        // 186
+#define TAMA_LCD_X_RIGHT      (TAMA_LCD_X + TAMA_DRAW_W)        // 142
+#define TAMA_LCD_Y_BOTTOM     (TAMA_LCD_Y + TAMA_DRAW_H)        // 194
 
 // ----- Icon layout (5 per row, 12×12 each) ----
 
@@ -54,7 +56,7 @@
 #define ICON_ROW_X            ((200 - ICON_ROW_W) / 2)          // 62
 
 #define ICONS_TOP_Y           126
-#define ICONS_BOT_Y           190
+#define ICONS_BOT_Y           198
 
 // ----- Tama device-frame (dynamic) ----
 
@@ -554,7 +556,7 @@ static void window_load(Window *window)
   text_layer_set_text(s_time_layer, "--:--");
   layer_add_child(root, text_layer_get_layer(s_time_layer));
 
-  s_battery_layer = text_layer_create(GRect(40, 70, 56, 20));
+  s_battery_layer = text_layer_create(GRect(35, 70, 70, 20));
   text_layer_set_text_alignment(s_battery_layer, GTextAlignmentLeft);
   text_layer_set_font(s_battery_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
   text_layer_set_background_color(s_battery_layer, GColorClear);
@@ -562,7 +564,9 @@ static void window_load(Window *window)
   text_layer_set_text(s_battery_layer, "--%");
   layer_add_child(root, text_layer_get_layer(s_battery_layer));
 
-  s_date_layer = text_layer_create(GRect(104, 70, 56, 20));
+  // Date needs ~85 px to fit "Fri 12 Jun" at GOTHIC_18_BOLD; 56 px clipped
+  // to "Fri 12 ...". Match P1 layout exactly.
+  s_date_layer = text_layer_create(GRect(95, 70, 85, 20));
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentRight);
   text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
   text_layer_set_background_color(s_date_layer, GColorClear);
