@@ -109,8 +109,8 @@ static GColor s_palette[4];
 #define HANDS_INNER_HOUR      4
 #define HANDS_INNER_MIN       2
 
-// Tama device frame color (when shown).
-#define TAMA_FRAME_FILL       GColorWhite
+// Tama device frame color is now a setting (s_tama_frame_color),
+// initialised in load_settings() and updated via AppMessage.
 
 // ----- Status icon bitmaps (12×12, MSB-first per row) ----
 
@@ -248,8 +248,11 @@ static void bg_update_proc(Layer *layer, GContext *ctx)
 // Layer covers the whole window so the rect we draw inside is in absolute
 // window coordinates. The rect's width is always FRAME_LEFT..FRAME_RIGHT
 // (LCD-anchored); only the vertical extent changes when icons are lit.
+// If the user disabled the frame in settings, we never draw.
 static void tama_bg_update_proc(Layer *layer, GContext *ctx)
 {
+  if (!s_tama_frame_enabled) return;
+
   bool top_lit = false, bot_lit = false;
   for (int i = 0; i < 5; i++) if (s_icons[i])     top_lit = true;
   for (int i = 5; i < 10; i++) if (s_icons[i])    bot_lit = true;
@@ -261,7 +264,7 @@ static void tama_bg_update_proc(Layer *layer, GContext *ctx)
   int bottom = bot_lit ? (ICONS_BOT_Y + ICON_H + 3) : FRAME_IDLE_BOTTOM;
 
   GRect r = GRect(FRAME_LEFT, top, FRAME_RIGHT - FRAME_LEFT, bottom - top);
-  graphics_context_set_fill_color(ctx, TAMA_FRAME_FILL);
+  graphics_context_set_fill_color(ctx, s_tama_frame_color);
   graphics_fill_rect(ctx, r, FRAME_RADIUS, GCornersAll);
 }
 
@@ -427,7 +430,7 @@ static void hands_update_proc(Layer *layer, GContext *ctx)
 #define VIBE_COOLDOWN_S    5
 static bool   s_prev_attention = false;
 static time_t s_last_vibe_time = 0;
-static bool   s_vibration_enabled = true;   // Clay setting later
+static bool   s_vibration_enabled = true;   // Clay setting (loaded in load_settings)
 
 static void check_attention_and_vibrate(void)
 {
@@ -650,22 +653,140 @@ static void window_unload(Window *window)
   if (s_bg_layer)        { layer_destroy(s_bg_layer);         s_bg_layer = NULL; }
 }
 
-// ----- App init / deinit ----
+// ----- Persistent settings ------------------------------------------------
+//
+// Keys 1-99 reserved for settings. EEPROM uses 100..115.
 
-static void init_palette(void)
+#define PERSIST_KEY_VIBRATION_ENABLED   1
+#define PERSIST_KEY_TAMA_FRAME_ENABLED  2
+#define PERSIST_KEY_TAMA_FRAME_COLOR    3
+#define PERSIST_KEY_TAMA_PIXEL_COLOR    4
+
+// Runtime setting state. Defaults match the previously hardcoded look.
+// s_vibration_enabled lives in the attention block above.
+static bool   s_tama_frame_enabled = true;
+static GColor s_tama_frame_color;   // initialised in load_settings
+static GColor s_tama_pixel_color;   // initialised in load_settings
+
+// Re-derive the 4-shade greyscale palette from a single user-chosen
+// "darkest pixel" color. We blend toward white in 4 equal steps:
+//   shade 0 (lightest, LCD-off background) = pure white
+//   shade 3 (darkest)                       = user's choice
+// Aplite (no color) keeps the binary scheme.
+static void update_palette_from_color(GColor user_color)
 {
 #if defined(PBL_COLOR)
-  s_palette[0] = GColorFromHEX(0xDDDDDD);
-  s_palette[1] = GColorFromHEX(0x9E9E9E);
-  s_palette[2] = GColorFromHEX(0x606060);
-  s_palette[3] = GColorFromHEX(0x222222);
+  uint8_t r_user = user_color.r;   // 0..3 (2 bits per channel on Pebble)
+  uint8_t g_user = user_color.g;
+  uint8_t b_user = user_color.b;
+  for (int i = 0; i < 4; i++) {
+    int r = (3 * (3 - i) + r_user * i + 1) / 3;
+    int g = (3 * (3 - i) + g_user * i + 1) / 3;
+    int b = (3 * (3 - i) + b_user * i + 1) / 3;
+    if (r > 3) r = 3; if (g > 3) g = 3; if (b > 3) b = 3;
+    if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
+    s_palette[i].a = 3;
+    s_palette[i].r = (uint8_t)r;
+    s_palette[i].g = (uint8_t)g;
+    s_palette[i].b = (uint8_t)b;
+  }
 #else
+  (void)user_color;
   s_palette[0] = GColorWhite;
   s_palette[1] = GColorWhite;
   s_palette[2] = GColorBlack;
   s_palette[3] = GColorBlack;
 #endif
 }
+
+static void load_settings(void)
+{
+  s_vibration_enabled  = persist_exists(PERSIST_KEY_VIBRATION_ENABLED)
+                       ? persist_read_bool(PERSIST_KEY_VIBRATION_ENABLED) : true;
+  s_tama_frame_enabled = persist_exists(PERSIST_KEY_TAMA_FRAME_ENABLED)
+                       ? persist_read_bool(PERSIST_KEY_TAMA_FRAME_ENABLED) : true;
+
+  if (persist_exists(PERSIST_KEY_TAMA_FRAME_COLOR)) {
+    int v = persist_read_int(PERSIST_KEY_TAMA_FRAME_COLOR);
+    s_tama_frame_color = (GColor){ .argb = (uint8_t)v };
+  } else {
+    s_tama_frame_color = GColorWhite;
+  }
+
+  if (persist_exists(PERSIST_KEY_TAMA_PIXEL_COLOR)) {
+    int v = persist_read_int(PERSIST_KEY_TAMA_PIXEL_COLOR);
+    s_tama_pixel_color = (GColor){ .argb = (uint8_t)v };
+  } else {
+    s_tama_pixel_color = GColorBlack;
+  }
+
+  update_palette_from_color(s_tama_pixel_color);
+}
+
+static void save_settings(void)
+{
+  persist_write_bool(PERSIST_KEY_VIBRATION_ENABLED,  s_vibration_enabled);
+  persist_write_bool(PERSIST_KEY_TAMA_FRAME_ENABLED, s_tama_frame_enabled);
+  persist_write_int (PERSIST_KEY_TAMA_FRAME_COLOR,   s_tama_frame_color.argb);
+  persist_write_int (PERSIST_KEY_TAMA_PIXEL_COLOR,   s_tama_pixel_color.argb);
+}
+
+// ----- AppMessage (Clay settings round-trip) ------------------------------
+//
+// Clay packs each setting into a Tuple under its messageKey. Numeric keys
+// (toggles) come through as Boolean / Int; color pickers send a 32-bit
+// 0xRRGGBB integer that we convert to a Pebble GColor.
+
+static void inbox_received_handler(DictionaryIterator *iter, void *context)
+{
+  Tuple *t;
+  bool changed_palette = false;
+
+  t = dict_find(iter, MESSAGE_KEY_VibrationEnabled);
+  if (t) {
+    s_vibration_enabled = (t->value->int8 != 0);
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: VibrationEnabled = %d",
+            (int)s_vibration_enabled);
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_TamaFrameEnabled);
+  if (t) {
+    s_tama_frame_enabled = (t->value->int8 != 0);
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: TamaFrameEnabled = %d",
+            (int)s_tama_frame_enabled);
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_TamaFrameColor);
+  if (t) {
+    uint32_t hex = (uint32_t)t->value->int32;
+    s_tama_frame_color = GColorFromHEX(hex);
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: TamaFrameColor = 0x%06lx",
+            (unsigned long)hex);
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_TamaPixelColor);
+  if (t) {
+    uint32_t hex = (uint32_t)t->value->int32;
+    s_tama_pixel_color = GColorFromHEX(hex);
+    changed_palette = true;
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: TamaPixelColor = 0x%06lx",
+            (unsigned long)hex);
+  }
+
+  if (changed_palette) {
+    update_palette_from_color(s_tama_pixel_color);
+  }
+
+  save_settings();
+
+  // Trigger a redraw so the new look takes effect immediately.
+  if (s_tama_bg_layer)   layer_mark_dirty(s_tama_bg_layer);
+  if (s_tama_layer)      layer_mark_dirty(s_tama_layer);
+  if (s_icons_top_layer) layer_mark_dirty(s_icons_top_layer);
+  if (s_icons_bot_layer) layer_mark_dirty(s_icons_bot_layer);
+}
+
+// ----- App init / deinit ----
 
 // Periodic RTC sync — currently 60 seconds for testing. Once verified
 // stable, can be raised to 15 minutes. Boot phase may overwrite our
@@ -683,7 +804,7 @@ static void rtc_sync_tick(void *data)
 
 static void app_init(void)
 {
-  init_palette();
+  load_settings();
 
   if (!tamago_init()) {
     APP_LOG(APP_LOG_LEVEL_ERROR, "tamago_init failed -- aborting");
@@ -709,9 +830,12 @@ static void app_init(void)
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
   battery_state_service_subscribe(battery_handler);
 
+  // Clay sends settings via AppMessage whenever the user hits Save.
+  app_message_register_inbox_received(inbox_received_handler);
+  app_message_open(256, 64);
+
   s_running = true;
   s_step_timer = app_timer_register(EMU_FRAME_MS, step_tick, NULL);
-  // First RTC drift check after 15 minutes; we already initial-synced above.
   s_rtc_sync_timer = app_timer_register(RTC_SYNC_INTERVAL_MS, rtc_sync_tick, NULL);
 }
 
