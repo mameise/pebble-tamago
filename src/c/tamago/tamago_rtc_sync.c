@@ -65,11 +65,15 @@ int32_t tamago_rtc_periodic_check(void)
   if (drift < -43200) drift += 86400;
   int32_t abs_drift = drift < 0 ? -drift : drift;
 
-  // Always log so we can verify the timer is firing on schedule.
-  // TODO: drop to "only if drift >= 2" once we've confirmed.
-  APP_LOG(APP_LOG_LEVEL_INFO,
-          "rtc_sync: tama=%02d:%02d:%02d real=%02d:%02d:%02d drift=%lds (resync)",
-          th, tm, ts, t->tm_hour, t->tm_min, t->tm_sec, (long)drift);
+  // Always sync. The CPU emulator runs the Tama clock ~5% slow, so
+  // drift would otherwise grow ~1-2s/min. Three RAM writes per sync
+  // are negligible. Only log when drift is meaningfully nonzero so the
+  // log isn't spammy.
+  if (abs_drift >= 2) {
+    APP_LOG(APP_LOG_LEVEL_INFO,
+            "rtc_sync: tama=%02d:%02d:%02d real=%02d:%02d:%02d drift=%lds (resync)",
+            th, tm, ts, t->tm_hour, t->tm_min, t->tm_sec, (long)drift);
+  }
   write_pebble_time_to_tama(t);
   return abs_drift;
 }
