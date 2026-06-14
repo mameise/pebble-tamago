@@ -153,4 +153,16 @@ typedef struct {
 
 void tamago_profile_snapshot_and_reset(tamago_profile_snapshot_t *out);
 
+// ----- Sound-event polling -----
+// Returns a monotonically increasing counter that bumps every time the
+// Tama firmware writes to any SPU register ($3050-$306F). The platform
+// audio glue (main.c) compares this to its last seen value to detect
+// new sound events; on change it inspects the registers and produces
+// a brief feedback pulse.
+uint32_t tamago_sound_event_seq(void);
+
+// Read any I/O register from $30xx (used to inspect SPU state when a
+// new sound event is detected). reg is the low byte of the I/O address.
+uint8_t  tamago_ioreg_read(uint8_t reg);
+
 #endif // TAMAGO_H

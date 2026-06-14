@@ -213,9 +213,23 @@ uint8_t tamago_io_read(uint16_t addr)
 }
 
 // Slow-path I/O write — called only when tamago_write_page[page] is NULL.
+// ----- Sound-event detection (platform-independent) ----------------------
+//
+// The Tama-Go's SPU lives in I/O registers $3050-$306F. The firmware
+// writes these once and leaves them set — real hardware has a hardware
+// envelope that decays after a fixed time; we don't emulate the
+// envelope, so the registers "hang". Instead of polling the registers
+// (which would yield a drone), we count discrete WRITES. Each write
+// = one sound event. The platform-side audio code (main.c) polls
+// g_snd_write_seq and pulses feedback on changes.
+volatile uint32_t g_snd_write_seq = 0;
+
 void tamago_io_write(uint16_t addr, uint8_t value)
 {
   uint8_t reg = addr & 0xFF;
+  if (reg >= 0x50 && reg <= 0x6F) {
+    g_snd_write_seq++;
+  }
   switch (reg) {
     case 0x00: io_write_bank(reg, value);     break;
     case 0x11: io_write_porta(reg, value);    break;
@@ -230,11 +244,9 @@ void tamago_io_write(uint16_t addr, uint8_t value)
   }
 }
 
-// Sound investigation note (kept here for reference):
-//   $3060/$3062/$3064/$3065 are written in lockstep 4-tuples — strong
-//   candidate for SPU channel control. Re-add an I/O write counter here
-//   if/when sound work resumes. Removed to keep hot-path lean and the
-//   APP_LOG quiet.
+// Public accessors for the audio glue in main.c.
+uint32_t tamago_sound_event_seq(void) { return g_snd_write_seq; }
+uint8_t  tamago_ioreg_read(uint8_t reg) { return g_cpureg[reg]; }
 
 // ----- IRQ / NMI dispatch helpers ----------------------------------------
 
