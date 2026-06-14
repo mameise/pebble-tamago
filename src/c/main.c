@@ -504,6 +504,66 @@ static void check_attention_and_vibrate(void)
   s_prev_attention = attention;
 }
 
+// ----- Sound feedback (speaker_play_tone, Rebble SDK extension) ----
+//
+// Pebble Time 2 (Emery) has speaker hardware; the Rebble SDK exposes
+// `speaker_play_tone(freq, duration_ms, volume, waveform)` and
+// `speaker_stop()` when PBL_SPEAKER is defined. We map Tama-Go SPU
+// register writes directly to short tone bursts.
+//
+// The core (tamago_io_write) bumps g_snd_write_seq on every write to
+// $3050-$306F. We poll it every emulator frame and trigger a tone if
+// a new event was detected and the enable+period registers are valid.
+//
+// SOUND_CLOCK is empirically calibrated — freq = SOUND_CLOCK / period.
+// 960000 puts the most common menu-click period (~640) at ~1500 Hz
+// which matches the real Tama-Go pitch closely. Adjust SOUND_CLOCK
+// proportionally to shift the whole pitch range up or down.
+#define SOUND_CLOCK              960000
+#define SOUND_TONE_MS            200       // max blip length
+#define SOUND_VIBE_COOLDOWN_MS   50        // min gap between tone restarts
+
+static uint32_t s_last_snd_seq = 0;
+static uint32_t s_last_snd_pulse_ms = 0;
+static bool     s_sound_enabled = false;     // Clay toggle (default off)
+static uint8_t  s_sound_volume  = 60;        // Clay slider 0..100
+
+static void check_sound_event(uint32_t now_ms)
+{
+  uint32_t seq = tamago_sound_event_seq();
+  if (seq == s_last_snd_seq) return;
+  s_last_snd_seq = seq;
+
+  if (!s_sound_enabled) return;
+
+  // Stop-style event — enable bit cleared OR period zero. Cut the
+  // current note short.
+  uint8_t  r55    = tamago_ioreg_read(0x55);
+  uint16_t period = tamago_ioreg_read(0x64) | (tamago_ioreg_read(0x65) << 8);
+  if (!r55 || !period) {
+#if defined(PBL_SPEAKER)
+    speaker_stop();
+#endif
+    return;
+  }
+
+  // Cooldown — avoid restarting the tone faster than the speaker can
+  // settle on a new frequency. Multi-note jingles still play; we just
+  // skip writes that arrive within ~50ms of the last one.
+  if (now_ms - s_last_snd_pulse_ms < SOUND_VIBE_COOLDOWN_MS) return;
+  s_last_snd_pulse_ms = now_ms;
+
+  uint32_t freq = SOUND_CLOCK / period;
+  if (freq < 80)   freq = 80;
+  if (freq > 8000) freq = 8000;
+
+#if defined(PBL_SPEAKER)
+  speaker_stop();
+  speaker_play_tone(freq, SOUND_TONE_MS, s_sound_volume,
+                    SpeakerWaveformSquare);
+#endif
+}
+
 // ----- Emulator step timer ----
 
 static void step_tick(void *data)
@@ -521,6 +581,11 @@ static void step_tick(void *data)
   time_ms(&epoch_s, &epoch_ms);
   uint32_t t1 = (uint32_t)epoch_s * 1000 + epoch_ms;
   uint32_t step_ms = t1 - t0;
+
+  // Sound feedback — poll the Tama's SPU write counter every frame
+  // (50 ms), pulse if a new sound event was detected. Cheap; runs even
+  // when SoundEnabled is off (the function early-outs).
+  check_sound_event(t1);
 
   // Periodic EEPROM flush every 5 minutes.
   static uint32_t flush_ctr = 0;
@@ -926,6 +991,8 @@ static void window_unload(Window *window)
 #define PERSIST_KEY_TEXT_OUTLINE_COLOR  13
 #define PERSIST_KEY_TIME_FORMAT         14
 #define PERSIST_KEY_DATE_FORMAT         15
+#define PERSIST_KEY_SOUND_ENABLED       16
+#define PERSIST_KEY_SOUND_VOLUME        17
 
 // Runtime setting state — declarations are at the top of the file
 // (forward-declared so the early update_proc functions can use them).
@@ -1053,6 +1120,19 @@ static void load_settings(void)
                 : 0;
   if (s_date_format > 2) s_date_format = 0;
 
+  s_sound_enabled = persist_exists(PERSIST_KEY_SOUND_ENABLED)
+                  ? persist_read_bool(PERSIST_KEY_SOUND_ENABLED)
+                  : false;
+
+  if (persist_exists(PERSIST_KEY_SOUND_VOLUME)) {
+    int v = persist_read_int(PERSIST_KEY_SOUND_VOLUME);
+    if (v < 0)   v = 0;
+    if (v > 100) v = 100;
+    s_sound_volume = (uint8_t)v;
+  } else {
+    s_sound_volume = 60;
+  }
+
   update_palette_from_color(s_tama_pixel_color);
 }
 
@@ -1073,6 +1153,8 @@ static void save_settings(void)
   persist_write_int (PERSIST_KEY_TEXT_OUTLINE_COLOR,   s_text_outline_color.argb);
   persist_write_int (PERSIST_KEY_TIME_FORMAT,          s_time_format);
   persist_write_int (PERSIST_KEY_DATE_FORMAT,          s_date_format);
+  persist_write_bool(PERSIST_KEY_SOUND_ENABLED,        s_sound_enabled);
+  persist_write_int (PERSIST_KEY_SOUND_VOLUME,         s_sound_volume);
 }
 
 // ----- AppMessage (Clay settings round-trip) ------------------------------
@@ -1236,6 +1318,26 @@ static void inbox_received_handler(DictionaryIterator *iter, void *context)
             (int)s_date_format);
   }
 
+  t = dict_find(iter, MESSAGE_KEY_SoundEnabled);
+  if (t) {
+    s_sound_enabled = (t->value->int8 != 0);
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: SoundEnabled = %d",
+            (int)s_sound_enabled);
+#if defined(PBL_SPEAKER)
+    if (!s_sound_enabled) speaker_stop();
+#endif
+  }
+
+  t = dict_find(iter, MESSAGE_KEY_SoundVolume);
+  if (t) {
+    int v = (int)t->value->int32;
+    if (v < 0)   v = 0;
+    if (v > 100) v = 100;
+    s_sound_volume = (uint8_t)v;
+    APP_LOG(APP_LOG_LEVEL_INFO, "settings: SoundVolume = %d",
+            (int)s_sound_volume);
+  }
+
   // Reset Tama if the user toggled it on. Wipes EEPROM + resets the CPU
   // so the Tama firmware boots from a blank slate (first-time setup
   // screen / egg select). The toggle itself isn't persisted — it only
@@ -1337,6 +1439,9 @@ static void app_init(void)
 static void app_deinit(void)
 {
   s_running = false;
+#if defined(PBL_SPEAKER)
+  speaker_stop();
+#endif
   if (s_step_timer)     { app_timer_cancel(s_step_timer);     s_step_timer = NULL; }
   if (s_rtc_sync_timer) { app_timer_cancel(s_rtc_sync_timer); s_rtc_sync_timer = NULL; }
   battery_state_service_unsubscribe();
