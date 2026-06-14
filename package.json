@@ -36,6 +36,8 @@
       "TextOutlineColor",
       "TimeFormat",
       "DateFormat",
+      "SoundEnabled",
+      "SoundVolume",
       "ResetTama"
     ],
     "resources": {

@@ -109,6 +109,8 @@ Open the app's settings in the Pebble phone app to configure:
 | Section | Setting | Default |
 |---|---|---|
 | Notifications | Vibration on attention | On |
+| Notifications | Sound | Off |
+| Notifications | Sound volume | 60 (0–100) |
 | Tama display | Show frame | On |
 | Tama display | Frame color | White |
 | Tama display | Tama pixel color | Black (4-shade ramp blends to white) |
@@ -128,6 +130,31 @@ Open the app's settings in the Pebble phone app to configure:
 The **Tama pixel color** setting derives all four LCD greyscale shades
 from one user-chosen color by blending toward white — pick any color
 and the LCD will look natural in that hue.
+
+---
+
+## Sound
+
+Pebble Time 2 has a piezo speaker, exposed by the Rebble SDK via
+`speaker_play_tone(freq, duration, volume, waveform)`. The Tama-Go
+SPU registers ($3050–$306F) are detected by the emulator core on
+write and a short square-wave tone is played for each event.
+
+- **Sound** toggle in Notifications → Sound (off by default).
+- **Sound volume** slider (0–100, default 60).
+- Vibration (Notifications → Vibration on attention) is independent
+  and only fires on the bell-icon rising edge — it's unaffected by
+  the Sound setting.
+
+The frequency mapping uses `freq = 960 000 ÷ period`, calibrated so
+the typical menu-click period (~640) lands near 1500 Hz, matching
+the original device pitch.
+
+Detection is platform-independent (in `tamago_memory.c`). On hardware
+without `PBL_SPEAKER`, `check_sound_event()` runs but the speaker
+calls are `#if`'d out — no-op, no warning. Ports to other platforms
+with real audio replace just the `speaker_play_tone`/`speaker_stop`
+calls.
 
 ---
 
