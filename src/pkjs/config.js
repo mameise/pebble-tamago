@@ -21,6 +21,23 @@ module.exports = [
         "label": "Vibrate on attention",
         "description": "Watch vibrates once when the Tama needs attention (hungry, sick, ...).",
         "defaultValue": true
+      },
+      {
+        "type": "toggle",
+        "messageKey": "SoundEnabled",
+        "label": "Sound",
+        "description": "Play the Tama-Go's menu clicks and beeps through the watch speaker. Tama-Go was a noisy device by design — enable this only if you want the full experience.",
+        "defaultValue": false
+      },
+      {
+        "type": "slider",
+        "messageKey": "SoundVolume",
+        "label": "Sound volume",
+        "description": "Speaker volume when Sound is enabled.",
+        "defaultValue": 60,
+        "min": 0,
+        "max": 100,
+        "step": 10
       }
     ]
   },
